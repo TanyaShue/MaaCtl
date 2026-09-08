@@ -1,0 +1,14 @@
+# Build outputs and runtime artifacts
+maactl.exe
+maactl
+/debug/
+
+# MaaFramework runtime is supplied locally or with releases
+/maafw/
+
+# Editor and OS files
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
