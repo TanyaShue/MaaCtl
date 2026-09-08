@@ -14,7 +14,10 @@ import (
 
 const version = "0.1.0"
 
-type cliOptions struct{ libDir string }
+type cliOptions struct {
+	libDir, interfacePath string
+	json                  bool
+}
 type deviceOptions struct{ json bool }
 
 type adbDeviceOutput struct {
@@ -55,7 +58,9 @@ func newRootCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	root.PersistentFlags().StringVarP(&global.libDir, "lib-dir", "l", "", "MaaFramework DLL directory (default: ./maafw/bin)")
-	root.AddCommand(newADBCommand(&global), newWin32Command(&global))
+	root.PersistentFlags().StringVarP(&global.interfacePath, "interface", "i", "", "ProjectInterface file or directory (default: ./interface.json)")
+	root.PersistentFlags().BoolVarP(&global.json, "json", "j", false, "output JSON")
+	root.AddCommand(newADBCommand(&global), newWin32Command(&global), newInterfaceCommand(&global))
 	return root
 }
 
@@ -92,6 +97,77 @@ func newDevicesCommand(global *cliOptions, kind string) *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&local.json, "json", "j", false, "output JSON")
 	return cmd
+}
+
+func newInterfaceCommand(global *cliOptions) *cobra.Command {
+	cmd := &cobra.Command{Use: "interface", Aliases: []string{"pi", "if"}, Short: "Inspect a ProjectInterface", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
+	cmd.AddCommand(newInterfaceShowCommand(global), newInterfaceListCommand(global, "controllers"), newInterfaceListCommand(global, "resources"), newInterfaceListCommand(global, "tasks"), newInterfaceValidateCommand(global))
+	return cmd
+}
+
+func newInterfaceShowCommand(global *cliOptions) *cobra.Command {
+	return &cobra.Command{Use: "show", Aliases: []string{"s"}, Short: "Show ProjectInterface summary", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
+		pi, err := loadPI(global.interfacePath)
+		if err != nil {
+			return err
+		}
+		if global.json {
+			return printJSON(map[string]any{"path": pi.Path, "name": pi.Name, "label": pi.Label, "interface_version": pi.InterfaceVersion, "controllers": len(pi.Controller), "resources": len(pi.Resource), "tasks": len(pi.Task)})
+		}
+		fmt.Printf("%s (%s)\ninterface: %s\ncontrollers: %d\nresources: %d\ntasks: %d\n", valueOrDash(pi.Label), valueOrDash(pi.Name), pi.Path, len(pi.Controller), len(pi.Resource), len(pi.Task))
+		return nil
+	}}
+}
+
+func newInterfaceListCommand(global *cliOptions, kind string) *cobra.Command {
+	aliases := map[string][]string{"controllers": {"controller", "c"}, "resources": {"resource", "r"}, "tasks": {"task", "t"}}
+	return &cobra.Command{Use: kind, Aliases: aliases[kind], Short: "List PI " + kind, Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
+		pi, err := loadPI(global.interfacePath)
+		if err != nil {
+			return err
+		}
+		var value any
+		switch kind {
+		case "controllers":
+			value = pi.Controller
+		case "resources":
+			value = pi.Resource
+		case "tasks":
+			value = pi.Task
+		}
+		if global.json {
+			return printJSON(value)
+		}
+		switch v := value.(type) {
+		case []controller:
+			for _, x := range v {
+				fmt.Printf("%s\t%s\t%s\n", x.Name, valueOrDash(x.Label), x.Type)
+			}
+		case []resource:
+			for _, x := range v {
+				fmt.Printf("%s\t%s\t%s\n", x.Name, valueOrDash(x.Label), join(x.Path))
+			}
+		case []task:
+			for _, x := range v {
+				fmt.Printf("%s\t%s\t%s\n", x.Name, valueOrDash(x.Label), x.Entry)
+			}
+		}
+		return nil
+	}}
+}
+
+func newInterfaceValidateCommand(global *cliOptions) *cobra.Command {
+	return &cobra.Command{Use: "validate", Aliases: []string{"v", "check"}, Short: "Validate ProjectInterface loading", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
+		pi, err := loadPI(global.interfacePath)
+		if err != nil {
+			return err
+		}
+		if global.json {
+			return printJSON(map[string]any{"valid": true, "path": pi.Path})
+		}
+		fmt.Printf("Valid ProjectInterface: %s\n", pi.Path)
+		return nil
+	}}
 }
 
 func listADB(jsonOutput bool) error {
