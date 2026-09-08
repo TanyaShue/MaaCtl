@@ -287,6 +287,9 @@ func execute(global *cliOptions, pi *loadedPI, piCtrl *controller, piRes *resour
 		return fmt.Errorf("initialize Maa tasker")
 	}
 	tasker.AddSink(&consoleTaskerSink{json: global.json})
+	// MaaFramework v5.13 emits Pipeline node notifications on the context sink.
+	// The ordinary tasker sink only receives Resource/Controller/Tasker events.
+	tasker.AddContextSink(&consoleContextSink{sink: &consoleTaskerSink{json: global.json}})
 
 	fmt.Printf("Running %s (resource=%s controller=%s)\n", entry, piRes.Name, piCtrl.Name)
 	job := tasker.PostTask(entry, override)
@@ -432,5 +435,42 @@ func (s *consoleTaskerSink) OnTaskAction(_ *maa.Tasker, e maa.EventStatus, d maa
 func (s *consoleTaskerSink) OnUnknownEvent(_ *maa.Tasker, msg, details string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	fmt.Printf("%s %s\n", msg, details)
+}
+
+// consoleContextSink receives node-level callbacks, including the focus field.
+// It forwards their original event category and status to the same formatter.
+type consoleContextSink struct{ sink *consoleTaskerSink }
+
+func (s *consoleContextSink) OnResourceLoading(_ *maa.Context, e maa.EventStatus, d maa.ResourceLoadingDetail) {
+	s.sink.output("Resource.Loading", e, d)
+}
+func (s *consoleContextSink) OnControllerAction(_ *maa.Context, e maa.EventStatus, d maa.ControllerActionDetail) {
+	s.sink.output("Controller.Action", e, d)
+}
+func (s *consoleContextSink) OnTaskerTask(_ *maa.Context, e maa.EventStatus, d maa.TaskerTaskDetail) {
+	s.sink.output("Tasker.Task", e, d)
+}
+func (s *consoleContextSink) OnNodePipelineNode(_ *maa.Context, e maa.EventStatus, d maa.NodePipelineNodeDetail) {
+	s.sink.output("Node.PipelineNode", e, d)
+}
+func (s *consoleContextSink) OnNodeRecognitionNode(_ *maa.Context, e maa.EventStatus, d maa.NodeRecognitionNodeDetail) {
+	s.sink.output("Node.RecognitionNode", e, d)
+}
+func (s *consoleContextSink) OnNodeActionNode(_ *maa.Context, e maa.EventStatus, d maa.NodeActionNodeDetail) {
+	s.sink.output("Node.ActionNode", e, d)
+}
+func (s *consoleContextSink) OnTaskNextList(_ *maa.Context, e maa.EventStatus, d maa.NodeNextListDetail) {
+	s.sink.output("Node.NextList", e, d)
+}
+func (s *consoleContextSink) OnTaskRecognition(_ *maa.Context, e maa.EventStatus, d maa.NodeRecognitionDetail) {
+	s.sink.output("Node.Recognition", e, d)
+}
+func (s *consoleContextSink) OnTaskAction(_ *maa.Context, e maa.EventStatus, d maa.NodeActionDetail) {
+	s.sink.output("Node.Action", e, d)
+}
+func (s *consoleContextSink) OnUnknownEvent(_ *maa.Context, msg, details string) {
+	s.sink.mu.Lock()
+	defer s.sink.mu.Unlock()
 	fmt.Printf("%s %s\n", msg, details)
 }
