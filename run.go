@@ -21,7 +21,7 @@ type runOptions struct {
 	override, overrideFile           string
 	optionValues, overlay            []string
 	events                           string
-	stopAfter                        time.Duration`r`n`tnoAgent                          bool
+	stopAfter                        time.Duration\n\tnoAgent                          bool
 }
 
 func newRunCommand(global *cliOptions) *cobra.Command {
@@ -529,4 +529,5 @@ func (s *consoleContextSink) OnUnknownEvent(_ *maa.Context, msg, details string)
 	defer s.sink.mu.Unlock()
 	fmt.Printf("%s %s\n", msg, details)
 }
+
 
