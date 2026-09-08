@@ -58,7 +58,7 @@ func newRootCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	root.PersistentFlags().StringVarP(&global.libDir, "lib-dir", "l", "", "MaaFramework DLL directory (default: ./maafw/bin)")
-	root.PersistentFlags().StringVarP(&global.interfacePath, "interface", "f", "", "ProjectInterface file or directory (default: ./interface.json)")
+	root.PersistentFlags().StringVarP(&global.interfacePath, "interface", "i", "", "ProjectInterface file or directory (default: ./interface.json)")
 	root.PersistentFlags().BoolVarP(&global.json, "json", "j", false, "output JSON")
 	root.AddCommand(newADBCommand(&global), newWin32Command(&global), newInterfaceCommand(&global), newResourceCommand(&global), newRunCommand(&global))
 	setFullHelp(root)
