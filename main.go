@@ -52,8 +52,8 @@ func run(args []string) error {
 func newRootCommand() *cobra.Command {
 	var global cliOptions
 	root := &cobra.Command{
-		Use: "maactl", Version: version, Short: "MaaFramework command-line tool",
-		Long:          "MaaCtl controls and inspects MaaFramework devices and resources.",
+		Use: "maactl", Version: version, Short: "MaaFramework and ProjectInterface command-line client",
+		Long:          "MaaCtl loads ProjectInterface v2 projects, inspects MaaFramework resources, and runs Pipeline tasks.\n\nUse positional arguments only for commands and required task/node names. Every option starts with - or --.",
 		SilenceErrors: true, SilenceUsage: true, Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
@@ -79,7 +79,7 @@ func newWin32Command(global *cliOptions) *cobra.Command {
 func newDevicesCommand(global *cliOptions, kind string) *cobra.Command {
 	var local deviceOptions
 	cmd := &cobra.Command{
-		Use: "devices", Aliases: []string{"list"}, Short: fmt.Sprintf("List %s devices", kind), Args: cobra.NoArgs,
+		Use: "devices", Short: fmt.Sprintf("List %s devices", kind), Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			libDir, err := resolveLibDir(global.libDir)
 			if err != nil {
@@ -100,13 +100,19 @@ func newDevicesCommand(global *cliOptions, kind string) *cobra.Command {
 }
 
 func newInterfaceCommand(global *cliOptions) *cobra.Command {
-	cmd := &cobra.Command{Use: "interface", Aliases: []string{"pi", "if"}, Short: "Inspect a ProjectInterface", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
-	cmd.AddCommand(newInterfaceShowCommand(global), newInterfaceListCommand(global, "controllers"), newInterfaceListCommand(global, "resources"), newInterfaceListCommand(global, "tasks"), newInterfaceValidateCommand(global))
+	cmd := &cobra.Command{Use: "interface", Short: "Inspect and validate a ProjectInterface", Long: "Inspect a ProjectInterface v2 file. Planned additions: options, presets and strict validation.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
+	cmd.AddCommand(newInterfaceShowCommand(global), newInterfaceListCommand(global, "controllers"), newInterfaceListCommand(global, "resources"), newInterfaceListCommand(global, "tasks"), newInterfaceValidateCommand(global), plannedInterfaceCommand("options", "List PI option definitions"), plannedInterfaceCommand("presets", "List PI presets"))
 	return cmd
 }
 
+func plannedInterfaceCommand(use, short string) *cobra.Command {
+	return &cobra.Command{Use: use, Short: short + " (planned)", Long: short + ". This command is part of the published CLI contract but is not implemented yet.", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
+		return fmt.Errorf("interface %s is not implemented yet", use)
+	}}
+}
+
 func newInterfaceShowCommand(global *cliOptions) *cobra.Command {
-	return &cobra.Command{Use: "show", Aliases: []string{"s"}, Short: "Show ProjectInterface summary", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
+	return &cobra.Command{Use: "show", Short: "Show ProjectInterface summary", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
 		pi, err := loadPI(global.interfacePath)
 		if err != nil {
 			return err
@@ -120,8 +126,7 @@ func newInterfaceShowCommand(global *cliOptions) *cobra.Command {
 }
 
 func newInterfaceListCommand(global *cliOptions, kind string) *cobra.Command {
-	aliases := map[string][]string{"controllers": {"controller", "c"}, "resources": {"resource", "r"}, "tasks": {"task", "t"}}
-	return &cobra.Command{Use: kind, Aliases: aliases[kind], Short: "List PI " + kind, Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
+	return &cobra.Command{Use: kind, Short: "List PI " + kind, Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
 		pi, err := loadPI(global.interfacePath)
 		if err != nil {
 			return err
@@ -157,7 +162,7 @@ func newInterfaceListCommand(global *cliOptions, kind string) *cobra.Command {
 }
 
 func newInterfaceValidateCommand(global *cliOptions) *cobra.Command {
-	return &cobra.Command{Use: "validate", Aliases: []string{"v", "check"}, Short: "Validate ProjectInterface loading", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
+	return &cobra.Command{Use: "validate", Short: "Validate ProjectInterface loading", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
 		pi, err := loadPI(global.interfacePath)
 		if err != nil {
 			return err

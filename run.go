@@ -16,18 +16,19 @@ import (
 type runOptions struct {
 	resource, controller, adbAddress string
 	override, overrideFile           string
+	optionValues, overlay            []string
 	stopAfter                        time.Duration
 }
 
 func newRunCommand(global *cliOptions) *cobra.Command {
-	cmd := &cobra.Command{Use: "run", Aliases: []string{"r"}, Short: "Run PI tasks or Pipeline nodes", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
-	cmd.AddCommand(newRunTaskCommand(global), newRunNodeCommand(global))
+	cmd := &cobra.Command{Use: "run", Short: "Run PI tasks or Pipeline nodes", Long: "Run supports task, node and (planned) preset execution. Use --help with a subcommand to view its options.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
+	cmd.AddCommand(newRunTaskCommand(global), newRunNodeCommand(global), plannedRunCommand("preset", "Run the enabled tasks in a PI preset"))
 	return cmd
 }
 
 func newResourceCommand(global *cliOptions) *cobra.Command {
 	var resourceName string
-	cmd := &cobra.Command{Use: "resource", Aliases: []string{"res"}, Short: "Load and inspect PI resources", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
+	cmd := &cobra.Command{Use: "resource", Short: "Load and inspect PI resources", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
 	add := func(use string, aliases []string, short string, nodes bool) {
 		cmd.AddCommand(&cobra.Command{Use: use, Aliases: aliases, Short: short, Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
 			pi, err := loadPI(global.interfacePath)
@@ -47,10 +48,19 @@ func newResourceCommand(global *cliOptions) *cobra.Command {
 			return inspectResource(global, pi, res, nodes)
 		}})
 	}
-	add("inspect", []string{"i", "show"}, "Show loaded resource metadata", false)
-	add("nodes", []string{"n", "list"}, "List loaded Pipeline nodes", true)
+	add("inspect", nil, "Show loaded resource metadata", false)
+	add("nodes", nil, "List loaded Pipeline nodes", true)
+	cmd.AddCommand(plannedResourceCommand("hash", "Print or verify the loaded resource hash"))
 	cmd.PersistentFlags().StringVarP(&resourceName, "resource", "r", "", "PI resource name (default: first resource)")
 	return cmd
+}
+
+func plannedRunCommand(use, short string) *cobra.Command {
+	return &cobra.Command{Use: use + " <name>", Short: short + " (planned)", Long: short + ". This command is part of the published CLI contract but is not implemented yet.", Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, _ []string) error { return fmt.Errorf("run %s is not implemented yet", use) }}
+}
+
+func plannedResourceCommand(use, short string) *cobra.Command {
+	return &cobra.Command{Use: use, Short: short + " (planned)", Long: short + ". This command is part of the published CLI contract but is not implemented yet.", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error { return fmt.Errorf("resource %s is not implemented yet", use) }}
 }
 
 func inspectResource(global *cliOptions, pi *loadedPI, spec *resource, listNodes bool) error {
@@ -104,12 +114,18 @@ func addRunFlags(cmd *cobra.Command, opt *runOptions) {
 	cmd.Flags().StringVarP(&opt.adbAddress, "adb-address", "a", "", "ADB device serial/address (default: only detected device)")
 	cmd.Flags().StringVarP(&opt.override, "override", "o", "", "final pipeline override JSON")
 	cmd.Flags().StringVarP(&opt.overrideFile, "override-file", "O", "", "file containing final pipeline override JSON")
+	cmd.Flags().StringArrayVarP(&opt.optionValues, "option", "p", nil, "planned: option value as name=<JSON>; repeatable")
+	cmd.Flags().StringArrayVar(&opt.overlay, "overlay", nil, "planned: additional resource root loaded after the selected resource; repeatable")
+	cmd.Flags().String("option-file", "", "planned: JSON file of option values")
+	cmd.Flags().Bool("dry-run", false, "planned: resolve and display execution without connecting a controller")
+	cmd.Flags().Bool("explain", false, "planned: display resource and Pipeline override layers")
+	cmd.Flags().String("events", "text", "planned: event format: text, jsonl, or off")
 	cmd.Flags().DurationVar(&opt.stopAfter, "stop-after", 0, "stop a running task after this duration (for bounded runs/tests)")
 }
 
 func newRunTaskCommand(global *cliOptions) *cobra.Command {
 	var opt runOptions
-	cmd := &cobra.Command{Use: "task <task-name>", Aliases: []string{"t"}, Short: "Run a task declared in ProjectInterface", Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "task <task-name>", Short: "Run a task declared in ProjectInterface", Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
 		pi, err := loadPI(global.interfacePath)
 		if err != nil {
 			return err
@@ -138,7 +154,7 @@ func newRunTaskCommand(global *cliOptions) *cobra.Command {
 
 func newRunNodeCommand(global *cliOptions) *cobra.Command {
 	var opt runOptions
-	cmd := &cobra.Command{Use: "node <node-name>", Aliases: []string{"n"}, Short: "Run a Pipeline node from a PI resource", Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "node <node-name>", Short: "Run a Pipeline node from a PI resource", Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
 		pi, err := loadPI(global.interfacePath)
 		if err != nil {
 			return err
