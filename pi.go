@@ -18,6 +18,12 @@ type projectInterface struct {
 	Resource         []resource   `json:"resource"`
 	Task             []task       `json:"task"`
 	Import           []string     `json:"import"`
+	Agent            *agentSpec   `json:"agent,omitempty"`
+}
+
+type agentSpec struct {
+	ChildExec string   `json:"child_exec"`
+	ChildArgs []string `json:"child_args"`
 }
 
 type controller struct {

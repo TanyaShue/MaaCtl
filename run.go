@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	maa "github.com/MaaXYZ/maa-framework-go/v3"
@@ -261,6 +264,28 @@ func execute(global *cliOptions, pi *loadedPI, piCtrl *controller, piRes *resour
 		return fmt.Errorf("initialize MaaFramework from %s: %w", libDir, err)
 	}
 	defer func() { _ = maa.Release() }()
+	var agent *exec.Cmd
+	if pi.Agent != nil && pi.Agent.ChildExec != "" {
+		execPath := pi.Agent.ChildExec
+		if !filepath.IsAbs(execPath) {
+			execPath = filepath.Join(pi.Dir, execPath)
+		}
+		agent = exec.Command(execPath, pi.Agent.ChildArgs...)
+		agent.Dir = pi.Dir
+		agent.Stdout, agent.Stderr = os.Stdout, os.Stderr
+		if err := agent.Start(); err != nil {
+			return fmt.Errorf("start agent: %w", err)
+		}
+		defer func() {
+			if agent.Process != nil {
+				_ = agent.Process.Kill()
+				_, _ = agent.Process.Wait()
+			}
+		}()
+	}
+	stopSignal := make(chan os.Signal, 1)
+	signal.Notify(stopSignal, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(stopSignal)
 
 	res := maa.NewResource()
 	if res == nil {
@@ -302,6 +327,9 @@ func execute(global *cliOptions, pi *loadedPI, piCtrl *controller, piRes *resour
 		done := make(chan maa.Status, 1)
 		go func() { done <- job.Wait().Status() }()
 		select {
+		case <-stopSignal:
+			tasker.PostStop()
+			return fmt.Errorf("task interrupted")
 		case status := <-done:
 			if !status.Success() {
 				return fmt.Errorf("task %q finished with %s before --stop-after", entry, status)
@@ -318,6 +346,12 @@ func execute(global *cliOptions, pi *loadedPI, piCtrl *controller, piRes *resour
 			fmt.Println("Task stopped by --stop-after")
 			return nil
 		}
+	}
+	select {
+	case <-stopSignal:
+		tasker.PostStop()
+		return fmt.Errorf("task interrupted")
+	default:
 	}
 	job.Wait()
 	if !job.Success() {
