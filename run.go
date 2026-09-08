@@ -21,7 +21,7 @@ type runOptions struct {
 	override, overrideFile           string
 	optionValues, overlay            []string
 	events                           string
-	stopAfter                        time.Duration
+	stopAfter                        time.Duration`r`n`tnoAgent                          bool
 }
 
 func newRunCommand(global *cliOptions) *cobra.Command {
@@ -165,7 +165,7 @@ func addRunFlags(cmd *cobra.Command, opt *runOptions) {
 	cmd.Flags().Bool("dry-run", false, "planned: resolve and display execution without connecting a controller")
 	cmd.Flags().Bool("explain", false, "planned: display resource and Pipeline override layers")
 	cmd.Flags().StringVar(&opt.events, "events", "focus", "sink output: focus (default), all, or off")
-	cmd.Flags().DurationVar(&opt.stopAfter, "stop-after", 0, "stop a running task after this duration (for bounded runs/tests)")
+	cmd.Flags().DurationVar(&opt.stopAfter, "stop-after", 0, "stop a running task after this duration (for bounded runs/tests)")`r`n\tcmd.Flags().BoolVar(&opt.noAgent, "no-agent", false, "do not start the ProjectInterface agent")
 }
 
 func newRunTaskCommand(global *cliOptions) *cobra.Command {
@@ -265,7 +265,7 @@ func execute(global *cliOptions, pi *loadedPI, piCtrl *controller, piRes *resour
 	}
 	defer func() { _ = maa.Release() }()
 	var agent *exec.Cmd
-	if pi.Agent != nil && pi.Agent.ChildExec != "" {
+	if !opt.noAgent && pi.Agent != nil && pi.Agent.ChildExec != "" {
 		execPath := pi.Agent.ChildExec
 		if !filepath.IsAbs(execPath) {
 			execPath = filepath.Join(pi.Dir, execPath)
@@ -529,3 +529,4 @@ func (s *consoleContextSink) OnUnknownEvent(_ *maa.Context, msg, details string)
 	defer s.sink.mu.Unlock()
 	fmt.Printf("%s %s\n", msg, details)
 }
+
