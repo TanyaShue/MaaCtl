@@ -370,13 +370,37 @@ type consoleTaskerSink struct {
 func (s *consoleTaskerSink) output(kind string, event maa.EventStatus, detail any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	b, _ := json.Marshal(detail)
+	var values map[string]any
+	_ = json.Unmarshal(b, &values)
+	message := kind + "." + eventName(event)
+	focus := renderFocus(message, values)
 	if s.json {
-		b, _ := json.Marshal(map[string]any{"event": kind, "status": event, "detail": detail})
+		out := map[string]any{"event": message, "status": event, "detail": values}
+		if focus != "" {
+			out["focus"] = focus
+		}
+		b, _ = json.Marshal(out)
 		fmt.Println(string(b))
 		return
 	}
-	b, _ := json.Marshal(detail)
-	fmt.Printf("%s status=%d %s\n", kind, event, b)
+	if focus != "" {
+		fmt.Printf("%s\n", focus)
+	}
+	fmt.Printf("%s %s\n", message, b)
+}
+
+func eventName(event maa.EventStatus) string {
+	switch event {
+	case maa.EventStatusStarting:
+		return "Starting"
+	case maa.EventStatusSucceeded:
+		return "Succeeded"
+	case maa.EventStatusFailed:
+		return "Failed"
+	default:
+		return "Unknown"
+	}
 }
 func (s *consoleTaskerSink) OnResourceLoading(_ *maa.Tasker, e maa.EventStatus, d maa.ResourceLoadingDetail) {
 	s.output("Resource.Loading", e, d)
