@@ -21,14 +21,53 @@ type runOptions struct {
 }
 
 func newRunCommand(global *cliOptions) *cobra.Command {
-	cmd := &cobra.Command{Use: "run", Short: "Run PI tasks or Pipeline nodes", Long: "Run supports task, node and (planned) preset execution. Use --help with a subcommand to view its options.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
+	var taskName, nodeName string
+	var opt runOptions
+	cmd := &cobra.Command{Use: "run", Short: "Run PI tasks or Pipeline nodes", Long: "Run supports task, node and (planned) preset execution. Shortcuts: -t <task-name>, -n <node-name>. Use --help with a subcommand to view all options.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+		if taskName != "" && nodeName != "" {
+			return fmt.Errorf("choose only one run shortcut: -t/--task or -n/--node")
+		}
+		if taskName != "" {
+			return runTask(global, taskName, opt)
+		}
+		if nodeName != "" {
+			return runNode(global, nodeName, opt)
+		}
+		return c.Help()
+	}}
+	cmd.Flags().StringVarP(&taskName, "task", "t", "", "shortcut for: run task <task-name>")
+	cmd.Flags().StringVarP(&nodeName, "node", "n", "", "shortcut for: run node <node-name>")
+	addRunFlags(cmd, &opt)
 	cmd.AddCommand(newRunTaskCommand(global), newRunNodeCommand(global), plannedRunCommand("preset", "Run the enabled tasks in a PI preset"))
 	return cmd
 }
 
 func newResourceCommand(global *cliOptions) *cobra.Command {
 	var resourceName string
-	cmd := &cobra.Command{Use: "resource", Short: "Load and inspect PI resources", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
+	var inspect, nodes bool
+	cmd := &cobra.Command{Use: "resource", Short: "Load and inspect PI resources", Long: "Load and inspect PI resources. Shortcuts: -i inspect, -n nodes.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+		if !inspect && !nodes {
+			return c.Help()
+		}
+		if inspect && nodes {
+			return fmt.Errorf("choose only one resource shortcut")
+		}
+		pi, err := loadPI(global.interfacePath)
+		if err != nil {
+			return err
+		}
+		var ctrl *controller
+		if len(pi.Controller) == 1 {
+			ctrl = &pi.Controller[0]
+		} else {
+			ctrl = &controller{}
+		}
+		res, err := pi.findResource(resourceName, ctrl)
+		if err != nil {
+			return err
+		}
+		return inspectResource(global, pi, res, nodes)
+	}}
 	add := func(use string, aliases []string, short string, nodes bool) {
 		cmd.AddCommand(&cobra.Command{Use: use, Aliases: aliases, Short: short, Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
 			pi, err := loadPI(global.interfacePath)
@@ -52,6 +91,8 @@ func newResourceCommand(global *cliOptions) *cobra.Command {
 	add("nodes", nil, "List loaded Pipeline nodes", true)
 	cmd.AddCommand(plannedResourceCommand("hash", "Print or verify the loaded resource hash"))
 	cmd.PersistentFlags().StringVarP(&resourceName, "resource", "r", "", "PI resource name (default: first resource)")
+	cmd.Flags().BoolVarP(&inspect, "inspect", "i", false, "shortcut for: resource inspect")
+	cmd.Flags().BoolVarP(&nodes, "nodes", "n", false, "shortcut for: resource nodes")
 	return cmd
 }
 
@@ -126,27 +167,7 @@ func addRunFlags(cmd *cobra.Command, opt *runOptions) {
 func newRunTaskCommand(global *cliOptions) *cobra.Command {
 	var opt runOptions
 	cmd := &cobra.Command{Use: "task <task-name>", Short: "Run a task declared in ProjectInterface", Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
-		pi, err := loadPI(global.interfacePath)
-		if err != nil {
-			return err
-		}
-		ctrl, err := pi.findController(opt.controller)
-		if err != nil {
-			return err
-		}
-		res, err := pi.findResource(opt.resource, ctrl)
-		if err != nil {
-			return err
-		}
-		t, err := pi.findTask(args[0], ctrl, res)
-		if err != nil {
-			return err
-		}
-		override, err := readOverride(opt)
-		if err != nil {
-			return err
-		}
-		return execute(global, pi, ctrl, res, t.Entry, override, opt)
+		return runTask(global, args[0], opt)
 	}}
 	addRunFlags(cmd, &opt)
 	return cmd
@@ -155,26 +176,54 @@ func newRunTaskCommand(global *cliOptions) *cobra.Command {
 func newRunNodeCommand(global *cliOptions) *cobra.Command {
 	var opt runOptions
 	cmd := &cobra.Command{Use: "node <node-name>", Short: "Run a Pipeline node from a PI resource", Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
-		pi, err := loadPI(global.interfacePath)
-		if err != nil {
-			return err
-		}
-		ctrl, err := pi.findController(opt.controller)
-		if err != nil {
-			return err
-		}
-		res, err := pi.findResource(opt.resource, ctrl)
-		if err != nil {
-			return err
-		}
-		override, err := readOverride(opt)
-		if err != nil {
-			return err
-		}
-		return execute(global, pi, ctrl, res, args[0], override, opt)
+		return runNode(global, args[0], opt)
 	}}
 	addRunFlags(cmd, &opt)
 	return cmd
+}
+
+func runTask(global *cliOptions, name string, opt runOptions) error {
+	pi, err := loadPI(global.interfacePath)
+	if err != nil {
+		return err
+	}
+	ctrl, err := pi.findController(opt.controller)
+	if err != nil {
+		return err
+	}
+	res, err := pi.findResource(opt.resource, ctrl)
+	if err != nil {
+		return err
+	}
+	override, err := readOverride(opt)
+	if err != nil {
+		return err
+	}
+	t, err := pi.findTask(name, ctrl, res)
+	if err != nil {
+		return err
+	}
+	return execute(global, pi, ctrl, res, t.Entry, override, opt)
+}
+
+func runNode(global *cliOptions, name string, opt runOptions) error {
+	pi, err := loadPI(global.interfacePath)
+	if err != nil {
+		return err
+	}
+	ctrl, err := pi.findController(opt.controller)
+	if err != nil {
+		return err
+	}
+	res, err := pi.findResource(opt.resource, ctrl)
+	if err != nil {
+		return err
+	}
+	override, err := readOverride(opt)
+	if err != nil {
+		return err
+	}
+	return execute(global, pi, ctrl, res, name, override, opt)
 }
 
 func readOverride(opt runOptions) (any, error) {

@@ -58,7 +58,7 @@ func newRootCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	root.PersistentFlags().StringVarP(&global.libDir, "lib-dir", "l", "", "MaaFramework DLL directory (default: ./maafw/bin)")
-	root.PersistentFlags().StringVarP(&global.interfacePath, "interface", "i", "", "ProjectInterface file or directory (default: ./interface.json)")
+	root.PersistentFlags().StringVarP(&global.interfacePath, "interface", "f", "", "ProjectInterface file or directory (default: ./interface.json)")
 	root.PersistentFlags().BoolVarP(&global.json, "json", "j", false, "output JSON")
 	root.AddCommand(newADBCommand(&global), newWin32Command(&global), newInterfaceCommand(&global), newResourceCommand(&global), newRunCommand(&global))
 	return root
@@ -100,7 +100,39 @@ func newDevicesCommand(global *cliOptions, kind string) *cobra.Command {
 }
 
 func newInterfaceCommand(global *cliOptions) *cobra.Command {
-	cmd := &cobra.Command{Use: "interface", Short: "Inspect and validate a ProjectInterface", Long: "Inspect a ProjectInterface v2 file. Planned additions: options, presets and strict validation.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
+	var show, controllers, resources, tasks, validate bool
+	cmd := &cobra.Command{Use: "interface", Short: "Inspect and validate a ProjectInterface", Long: "Inspect a ProjectInterface v2 file. Shortcuts: -s show, -c controllers, -r resources, -t tasks, -v validate. Planned additions: options and presets.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+		choices := 0
+		for _, selected := range []bool{show, controllers, resources, tasks, validate} {
+			if selected {
+				choices++
+			}
+		}
+		if choices == 0 {
+			return c.Help()
+		}
+		if choices > 1 {
+			return fmt.Errorf("choose only one interface shortcut")
+		}
+		if show {
+			return newInterfaceShowCommand(global).RunE(c, nil)
+		}
+		if controllers {
+			return newInterfaceListCommand(global, "controllers").RunE(c, nil)
+		}
+		if resources {
+			return newInterfaceListCommand(global, "resources").RunE(c, nil)
+		}
+		if tasks {
+			return newInterfaceListCommand(global, "tasks").RunE(c, nil)
+		}
+		return newInterfaceValidateCommand(global).RunE(c, nil)
+	}}
+	cmd.Flags().BoolVarP(&show, "show", "s", false, "shortcut for: interface show")
+	cmd.Flags().BoolVarP(&controllers, "controllers", "c", false, "shortcut for: interface controllers")
+	cmd.Flags().BoolVarP(&resources, "resources", "r", false, "shortcut for: interface resources")
+	cmd.Flags().BoolVarP(&tasks, "tasks", "t", false, "shortcut for: interface tasks")
+	cmd.Flags().BoolVarP(&validate, "validate", "v", false, "shortcut for: interface validate")
 	cmd.AddCommand(newInterfaceShowCommand(global), newInterfaceListCommand(global, "controllers"), newInterfaceListCommand(global, "resources"), newInterfaceListCommand(global, "tasks"), newInterfaceValidateCommand(global), plannedInterfaceCommand("options", "List PI option definitions"), plannedInterfaceCommand("presets", "List PI presets"))
 	return cmd
 }
