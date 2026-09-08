@@ -24,7 +24,7 @@ type runOptions struct {
 func newRunCommand(global *cliOptions) *cobra.Command {
 	var taskName, nodeName string
 	var opt runOptions
-	cmd := &cobra.Command{Use: "run", Short: "Run PI tasks or Pipeline nodes", Long: "Run supports task, node and (planned) preset execution. Shortcuts: -t <task-name>, -n <node-name>. Use --help with a subcommand to view all options.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "run", Short: "Run PI tasks or Pipeline nodes", Long: "Run supports task, node and (planned) preset execution. Shortcuts: -t <task-name>, -n <node-name>. Options for run and its subcommands are listed below.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		if taskName != "" && nodeName != "" {
 			return fmt.Errorf("choose only one run shortcut: -t/--task or -n/--node")
 		}

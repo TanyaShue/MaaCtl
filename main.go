@@ -61,6 +61,7 @@ func newRootCommand() *cobra.Command {
 	root.PersistentFlags().StringVarP(&global.interfacePath, "interface", "f", "", "ProjectInterface file or directory (default: ./interface.json)")
 	root.PersistentFlags().BoolVarP(&global.json, "json", "j", false, "output JSON")
 	root.AddCommand(newADBCommand(&global), newWin32Command(&global), newInterfaceCommand(&global), newResourceCommand(&global), newRunCommand(&global))
+	setFullHelp(root)
 	return root
 }
 

@@ -170,9 +170,14 @@ PI 中的 `import` 会随主 `interface.json` 一同加载。资源路径相对�
 
 ## 帮助与 JSON
 
+`-h` 与 `--help` 等价。顶层帮助列出所有命令、子命令及其完整参数；指定命令时，只展示该命令及其子命令的帮助。
+
 ```powershell
+./maactl.exe -h
 ./maactl.exe --help
+./maactl.exe run -h
 ./maactl.exe run --help
+./maactl.exe run task -h
 ./maactl.exe run task --help
 ./maactl.exe resource --help
 ./maactl.exe --version
