@@ -18,7 +18,8 @@ import (
 
 type runOptions struct {
 	resource, controller, adbAddress string
-	override, overrideFile           string
+`tstopAfter                        time.Duration
+`tnoAgent                          bool
 	optionValues, overlay            []string
 	events                           string
 	stopAfter                        time.Duration\n\tnoAgent                          bool
@@ -163,7 +164,8 @@ func addRunFlags(cmd *cobra.Command, opt *runOptions) {
 	cmd.Flags().StringArrayVar(&opt.overlay, "overlay", nil, "planned: additional resource root loaded after the selected resource; repeatable")
 	cmd.Flags().String("option-file", "", "planned: JSON file of option values")
 	cmd.Flags().Bool("dry-run", false, "planned: resolve and display execution without connecting a controller")
-	cmd.Flags().Bool("explain", false, "planned: display resource and Pipeline override layers")
+`tcmd.Flags().DurationVar(&opt.stopAfter, "stop-after", 0, "stop a running task after this duration (for bounded runs/tests)")
+`tcmd.Flags().BoolVar(&opt.noAgent, "no-agent", false, "do not start the ProjectInterface agent")
 	cmd.Flags().StringVar(&opt.events, "events", "focus", "sink output: focus (default), all, or off")
 	cmd.Flags().DurationVar(&opt.stopAfter, "stop-after", 0, "stop a running task after this duration (for bounded runs/tests)")`r`n\tcmd.Flags().BoolVar(&opt.noAgent, "no-agent", false, "do not start the ProjectInterface agent")
 }
@@ -529,5 +531,6 @@ func (s *consoleContextSink) OnUnknownEvent(_ *maa.Context, msg, details string)
 	defer s.sink.mu.Unlock()
 	fmt.Printf("%s %s\n", msg, details)
 }
+
 
 
