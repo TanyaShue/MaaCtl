@@ -17,6 +17,7 @@ type runOptions struct {
 	resource, controller, adbAddress string
 	override, overrideFile           string
 	optionValues, overlay            []string
+	events                           string
 	stopAfter                        time.Duration
 }
 
@@ -160,7 +161,7 @@ func addRunFlags(cmd *cobra.Command, opt *runOptions) {
 	cmd.Flags().String("option-file", "", "planned: JSON file of option values")
 	cmd.Flags().Bool("dry-run", false, "planned: resolve and display execution without connecting a controller")
 	cmd.Flags().Bool("explain", false, "planned: display resource and Pipeline override layers")
-	cmd.Flags().String("events", "text", "planned: event format: text, jsonl, or off")
+	cmd.Flags().StringVar(&opt.events, "events", "focus", "sink output: focus (default), all, or off")
 	cmd.Flags().DurationVar(&opt.stopAfter, "stop-after", 0, "stop a running task after this duration (for bounded runs/tests)")
 }
 
@@ -249,6 +250,9 @@ func readOverride(opt runOptions) (any, error) {
 }
 
 func execute(global *cliOptions, pi *loadedPI, piCtrl *controller, piRes *resource, entry string, override any, opt runOptions) error {
+	if opt.events != "focus" && opt.events != "all" && opt.events != "off" {
+		return fmt.Errorf("invalid --events value %q; use focus, all, or off", opt.events)
+	}
 	libDir, err := resolveLibDir(global.libDir)
 	if err != nil {
 		return err
@@ -286,10 +290,11 @@ func execute(global *cliOptions, pi *loadedPI, piCtrl *controller, piRes *resour
 	if !tasker.BindResource(res) || !tasker.BindController(ctrl) || !tasker.Initialized() {
 		return fmt.Errorf("initialize Maa tasker")
 	}
-	tasker.AddSink(&consoleTaskerSink{json: global.json})
+	sink := &consoleTaskerSink{json: global.json, mode: opt.events}
+	tasker.AddSink(sink)
 	// MaaFramework v5.13 emits Pipeline node notifications on the context sink.
 	// The ordinary tasker sink only receives Resource/Controller/Tasker events.
-	tasker.AddContextSink(&consoleContextSink{sink: &consoleTaskerSink{json: global.json}})
+	tasker.AddContextSink(&consoleContextSink{sink: sink})
 
 	fmt.Printf("Running %s (resource=%s controller=%s)\n", entry, piRes.Name, piCtrl.Name)
 	job := tasker.PostTask(entry, override)
@@ -367,6 +372,7 @@ func createController(spec *controller, opt runOptions) (*maa.Controller, error)
 // consoleTaskerSink prints every node event emitted through MaaFramework's tasker sink.
 type consoleTaskerSink struct {
 	json bool
+	mode string
 	mu   sync.Mutex
 }
 
@@ -378,13 +384,22 @@ func (s *consoleTaskerSink) output(kind string, event maa.EventStatus, detail an
 	_ = json.Unmarshal(b, &values)
 	message := kind + "." + eventName(event)
 	focus := renderFocus(message, values)
+	if s.mode == "off" || (s.mode == "focus" && focus == "") {
+		return
+	}
 	if s.json {
-		out := map[string]any{"event": message, "status": event, "detail": values}
-		if focus != "" {
-			out["focus"] = focus
+		out := map[string]any{"focus": focus}
+		if s.mode == "all" {
+			out["event"] = message
+			out["status"] = event
+			out["detail"] = values
 		}
 		b, _ = json.Marshal(out)
 		fmt.Println(string(b))
+		return
+	}
+	if s.mode == "focus" {
+		fmt.Printf("%s\n", focus)
 		return
 	}
 	if focus != "" {
@@ -433,6 +448,9 @@ func (s *consoleTaskerSink) OnTaskAction(_ *maa.Tasker, e maa.EventStatus, d maa
 	s.output("Node.Action", e, d)
 }
 func (s *consoleTaskerSink) OnUnknownEvent(_ *maa.Tasker, msg, details string) {
+	if s.mode != "all" {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	fmt.Printf("%s %s\n", msg, details)
@@ -470,6 +488,9 @@ func (s *consoleContextSink) OnTaskAction(_ *maa.Context, e maa.EventStatus, d m
 	s.sink.output("Node.Action", e, d)
 }
 func (s *consoleContextSink) OnUnknownEvent(_ *maa.Context, msg, details string) {
+	if s.sink.mode != "all" {
+		return
+	}
 	s.sink.mu.Lock()
 	defer s.sink.mu.Unlock()
 	fmt.Printf("%s %s\n", msg, details)
