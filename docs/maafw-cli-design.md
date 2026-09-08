@@ -53,13 +53,13 @@ maactl [global flags] <command>
   adb devices [--json]
   win32 devices [--json]
 
-  interface validate
-  interface show
-  interface controllers
-  interface resources
-  interface tasks
-  interface options
-  interface presets
+  interface --validate
+  interface --show
+  interface --controllers
+  interface --resources
+  interface --tasks
+  interface --options
+  interface --presets
 
   resource inspect
   resource nodes
@@ -83,26 +83,28 @@ maactl [global flags] <command>
 
 ## 发现和校验命令
 
-### `interface validate`
+### `interface --validate`
 
 ```text
-maactl interface validate [-i <path>] [--strict] [--json]
+maactl interface --validate [-i <path>] [--strict] [--json]
 ```
 
 检查 JSON/JSONC 可解析性、`interface_version == 2`、`import` 循环和缺失文件、名称唯一性、资源/控制器/任务/option 引用、option case 与 checkbox 数量约束，以及资源路径是否存在。`--strict` 将未知引用、资源 hash 缺失或不匹配、当前平台不能运行的控制器视为错误；默认模式中后两类仅为警告。
 
-### `interface show | controllers | resources | tasks | options | presets`
+### `interface --show | --controllers | --resources | --tasks | --options | --presets`
 
 ```text
-maactl interface show        [-i <path>] [--json]
-maactl interface controllers [-i <path>] [--type Adb|Win32] [--json]
-maactl interface resources   [-i <path>] [--controller <name>] [--json]
-maactl interface tasks       [-i <path>] [--resource <name>] [--controller <name>] [--group <name>] [--json]
-maactl interface options     [-i <path>] [--task <name>] [--resource <name>] [--controller <name>] [--json]
-maactl interface presets     [-i <path>] [--json]
+maactl interface --show        [-i <path>] [--json]
+maactl interface --controllers [-i <path>] [--type Adb|Win32] [--json]
+maactl interface --resources   [-i <path>] [--controller <name>] [--json]
+maactl interface --tasks       [-i <path>] [--resource <name>] [--controller <name>] [--group <name>] [--json]
+maactl interface --options     [-i <path>] [--task <name>] [--resource <name>] [--controller <name>] [--json]
+maactl interface --presets     [-i <path>] [--json]
 ```
 
-列表命令的过滤结果应区分 `available` 与 `reason_unavailable`，避免静默隐藏不兼容 task/option。`interface options` 返回 option 类型、case、默认值、嵌套 option 和经当前资源/控制器过滤后的可用性。
+`interface` 不再设置查询子命令，每次选择一个操作参数。`--show/-s`、`--controllers/-c`、`--resources/-r`、`--tasks/-t`、`--validate/-v` 支持短参数；`--options` 和 `--presets` 当前仍为计划功能。文本列表显示列名并按终端字符宽度对齐，JSON 输出保留结构化字段。
+
+列表查询的过滤结果应区分 `available` 与 `reason_unavailable`，避免静默隐藏不兼容 task/option。`interface --options` 返回 option 类型、case、默认值、嵌套 option 和经当前资源/控制器过滤后的可用性。
 
 ## 资源命令
 

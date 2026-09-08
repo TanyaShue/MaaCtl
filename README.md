@@ -20,40 +20,44 @@ MaaFramework 运行库优先从当前目录的 `./maafw/bin/` 加载；为兼容
 
 ```powershell
 # 在当前目录的 interface.json 上操作
-./maactl.exe interface show
+./maactl.exe interface --show
 
 # 指定 PI 项目目录
-./maactl.exe interface show -f D:\01_Projects\github\MaaMio
+./maactl.exe interface --show -f D:\01_Projects\github\MaaMio
 
 # 指定 PI 文件和 MaaFramework 运行库
-./maactl.exe interface show `
+./maactl.exe interface --show `
   -f D:\projects\demo\interface.json `
   -l D:\tools\maafw\bin
 ```
 
 ## 查看项目
 
+`interface` 使用操作参数，不再使用 `interface tasks` 等子命令。每次选择一个操作：`--show/-s`、`--controllers/-c`、`--resources/-r`、`--tasks/-t` 或 `--validate/-v`。
+
 ```powershell
 # PI 概览
-./maactl.exe interface show -f D:\01_Projects\github\MaaMio
+./maactl.exe interface --show -f D:\01_Projects\github\MaaMio
 
 # 列出控制器、资源与 task
-./maactl.exe interface controllers -f D:\01_Projects\github\MaaMio
-./maactl.exe interface resources -f D:\01_Projects\github\MaaMio
-./maactl.exe interface tasks -f D:\01_Projects\github\MaaMio
+./maactl.exe interface --controllers -f D:\01_Projects\github\MaaMio
+./maactl.exe interface --resources -f D:\01_Projects\github\MaaMio
+./maactl.exe interface --tasks -f D:\01_Projects\github\MaaMio
 
-# 对应的带横线快捷形式
+# 对应的短参数形式
 ./maactl.exe interface -s -f D:\01_Projects\github\MaaMio
 ./maactl.exe interface -c -f D:\01_Projects\github\MaaMio
 ./maactl.exe interface -r -f D:\01_Projects\github\MaaMio
 ./maactl.exe interface -t -f D:\01_Projects\github\MaaMio
 
 # 验证 PI 是否可加载；JSON 输出方便脚本处理
-./maactl.exe interface validate -f D:\01_Projects\github\MaaMio
-./maactl.exe interface tasks -f D:\01_Projects\github\MaaMio --json
+./maactl.exe interface --validate -f D:\01_Projects\github\MaaMio
+./maactl.exe interface --tasks -f D:\01_Projects\github\MaaMio --json
 ```
 
 PI 中的 `import` 会随主 `interface.json` 一同加载。资源路径相对于该 PI 文件所在目录解析。
+
+文本列表带有列名，并按终端显示宽度对齐中文和英文。`name` 是命令使用的名称，`label` 是 PI 中的显示名称；任务的 `entry` 是入口节点，控制器的 `type` 是类型，资源的 `path` 是资源路径。缺失值显示为 `-`，空列表显示“无数据”；`--json/-j` 仍输出原有 JSON 结构。
 
 ## 查看设备与资源
 
@@ -189,7 +193,7 @@ PI 中的 `import` 会随主 `interface.json` 一同加载。资源路径相对�
 
 帮助中以 `(planned)` 标注的命令或参数属于已预留的 CLI 契约，当前会明确返回未实现错误：
 
-- `interface options`、`interface presets`
+- `interface --options`、`interface --presets`
 - `resource hash`
 - `run preset <name>`
 - `--option/-p`、`--option-file`、`--overlay`、`--dry-run`、`--explain`
