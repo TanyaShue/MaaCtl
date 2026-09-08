@@ -25,6 +25,79 @@ func newRunCommand(global *cliOptions) *cobra.Command {
 	return cmd
 }
 
+func newResourceCommand(global *cliOptions) *cobra.Command {
+	var resourceName string
+	cmd := &cobra.Command{Use: "resource", Aliases: []string{"res"}, Short: "Load and inspect PI resources", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
+	add := func(use string, aliases []string, short string, nodes bool) {
+		cmd.AddCommand(&cobra.Command{Use: use, Aliases: aliases, Short: short, Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
+			pi, err := loadPI(global.interfacePath)
+			if err != nil {
+				return err
+			}
+			var ctrl *controller
+			if len(pi.Controller) == 1 {
+				ctrl = &pi.Controller[0]
+			} else {
+				ctrl = &controller{}
+			}
+			res, err := pi.findResource(resourceName, ctrl)
+			if err != nil {
+				return err
+			}
+			return inspectResource(global, pi, res, nodes)
+		}})
+	}
+	add("inspect", []string{"i", "show"}, "Show loaded resource metadata", false)
+	add("nodes", []string{"n", "list"}, "List loaded Pipeline nodes", true)
+	cmd.PersistentFlags().StringVarP(&resourceName, "resource", "r", "", "PI resource name (default: first resource)")
+	return cmd
+}
+
+func inspectResource(global *cliOptions, pi *loadedPI, spec *resource, listNodes bool) error {
+	libDir, err := resolveLibDir(global.libDir)
+	if err != nil {
+		return err
+	}
+	if err := maa.Init(maa.WithLibDir(libDir), maa.WithStdoutLevel(maa.LoggingLevelOff)); err != nil {
+		return err
+	}
+	defer func() { _ = maa.Release() }()
+	res := maa.NewResource()
+	if res == nil {
+		return fmt.Errorf("create Maa resource")
+	}
+	defer res.Destroy()
+	paths := make([]string, 0, len(spec.Path))
+	for _, path := range spec.Path {
+		full := filepath.Join(pi.Dir, path)
+		if !res.PostBundle(full).Wait().Success() {
+			return fmt.Errorf("load resource %s", full)
+		}
+		paths = append(paths, full)
+	}
+	if listNodes {
+		nodes, ok := res.GetNodeList()
+		if !ok {
+			return fmt.Errorf("read resource nodes")
+		}
+		if global.json {
+			return printJSON(nodes)
+		}
+		for _, node := range nodes {
+			fmt.Println(node)
+		}
+		return nil
+	}
+	hash, _ := res.GetHash()
+	nodes, _ := res.GetNodeList()
+	result := map[string]any{"name": spec.Name, "paths": paths, "hash": hash, "expected_hash": spec.Hash, "node_count": len(nodes)}
+	if global.json {
+		return printJSON(result)
+	}
+	fmt.Printf("resource: %s\nhash: %s\nnodes: %d\n", spec.Name, hash, len(nodes))
+	return nil
+}
+
 func addRunFlags(cmd *cobra.Command, opt *runOptions) {
 	cmd.Flags().StringVarP(&opt.resource, "resource", "r", "", "PI resource name (default: first compatible resource)")
 	cmd.Flags().StringVarP(&opt.controller, "controller", "c", "", "PI controller name (default: only controller)")
