@@ -17,6 +17,7 @@
 # npm wrapper
 /npm/node_modules/
 /npm/vendor/
+/npm/platforms/
 /npm/*.tgz
 
 # Editor and OS files

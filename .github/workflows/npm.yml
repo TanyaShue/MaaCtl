@@ -17,34 +17,52 @@ permissions:
 
 jobs:
   test:
-    name: Test wrapper
-    runs-on: windows-latest
+    name: Wrapper on ${{ matrix.os }}
+    # The wrapper is platform independent now that each platform's executable
+    # comes from its own optional dependency, so the tests run on all three.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
           node-version: 22
+
       - name: Run tests
         working-directory: npm
         run: npm test
+
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
+
       - name: Build maactl for the smoke test
-        shell: pwsh
-        run: go build -o maactl.exe ./cmd/maactl
-      - name: Package, then run maactl through npx
+        shell: bash
+        run: |
+          # The lite build: --version and --help never touch MaaFramework.
+          go build -o maactl${{ runner.os == 'Windows' && '.exe' || '' }} ./cmd/maactl
+
+      - name: Package, then run maactl through the wrapper
         working-directory: npm
+        shell: bash
         env:
-          # The lite build loads MaaFramework from ./maafw/bin, which this job
-          # never downloads; --version and --help do not need the DLLs.
+          # Proof that an install needs no network at all: with downloading
+          # forbidden, the wrapper can only succeed through the platform package.
           MAACTL_SKIP_DOWNLOAD: "1"
         run: |
+          package=$(cd .. && pwd)/maactl${{ runner.os == 'Windows' && '.exe' || '' }}
           npm pack --dry-run
-          node scripts/vendor-binary.js
-          npx --yes --package . maactl -v
-          npx --yes --package . maactl --help
+          node scripts/platform-packages.js check
+          node scripts/platform-packages.js link "$package"
+          node bin/maactl.js -v
+          node bin/maactl.js --help > /dev/null
+          # ...and once through the published entry point, npm's bin shim.
+          MAACTL_BINARY="$package" npx --yes --package . maactl -v

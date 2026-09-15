@@ -5,6 +5,7 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const platforms = require('../lib/platforms');
 const pkg = require('../package.json');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -22,20 +23,30 @@ test('the bin shim is executable-looking and dependency free', () => {
   assert.equal(pkg.devDependencies, undefined);
 });
 
-test('the package is Windows only and needs Node 22+', () => {
-  assert.deepEqual(pkg.os, ['win32']);
+test('the package runs everywhere and needs Node 22+', () => {
+  // The wrapper itself is portable; which platforms can actually run is decided
+  // by the optional dependencies below, not by an "os" restriction here.
+  assert.equal(pkg.os, undefined);
   assert.equal(pkg.engines.node, '>=22');
 });
 
-test('every file referenced by the manifest is published', () => {
-  for (const entry of ['bin/', 'lib/', 'scripts/', 'vendor/', 'README.md']) {
-    assert.ok(pkg.files.includes(entry), `${entry} must be listed in files`);
-  }
+test('one optional dependency carries the executable of every known platform', () => {
+  const expected = Object.fromEntries(platforms.all().map((entry) => [entry.package, pkg.version]));
+  assert.deepEqual(pkg.optionalDependencies, expected);
 });
 
-test('the postinstall hook points at an existing script', () => {
-  assert.equal(pkg.scripts.postinstall, 'node scripts/install.js');
-  assert.ok(fs.existsSync(path.join(ROOT, 'scripts', 'install.js')));
+test('no postinstall hook: installing never has to touch the network', () => {
+  assert.equal(pkg.scripts.postinstall, undefined);
+  assert.equal(pkg.scripts.install, undefined);
+});
+
+test('bumping the version re-pins the platform packages', () => {
+  assert.equal(pkg.scripts.version, 'node scripts/platform-packages.js sync-version');
+  assert.ok(fs.existsSync(path.join(ROOT, 'scripts', 'platform-packages.js')));
+});
+
+test('the tarball publishes the wrapper only, not the tooling or a vendored exe', () => {
+  assert.deepEqual([...pkg.files].sort(), ['README.md', 'bin/', 'lib/']);
 });
 
 test('the version is a publishable semver', () => {

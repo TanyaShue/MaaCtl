@@ -85,7 +85,7 @@ test('runBinary reports spawn failures with the executable path', async () => {
   const error = Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' });
   child.emit('error', error);
 
-  await assert.rejects(pending, /could not start maactl\.exe|无法启动 maactl\.exe/);
+  await assert.rejects(pending, /could not start maactl|无法启动 maactl/);
 });
 
 test('runBinary keeps the shim alive for the first Ctrl+C on Windows', async () => {

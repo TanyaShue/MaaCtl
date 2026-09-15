@@ -6,49 +6,43 @@
 
 const MESSAGES = {
   zh: {
-    downloading: (url) => `maactl: 首次使用，正在下载 maactl.exe\n  ${url}`,
+    downloading: (url) => `maactl: 首次使用，正在下载 ${url.split('/').pop()}\n  ${url}`,
     downloaded: (size, dest) => `maactl: 已下载 ${size} 到 ${dest}`,
-    downloadFailed: (url, reason) =>
-      `maactl: 下载 maactl.exe 失败\n  ${url}\n  原因: ${reason}`,
-    extractFailed: (archive, reason) =>
-      `maactl: 解压 release 压缩包失败\n  ${archive}\n  原因: ${reason}`,
-    verifyFailed: (file, reason) => `maactl: 下载的 maactl.exe 校验失败 (${file})\n  原因: ${reason}`,
+    downloadFailed: (url, reason) => `maactl: 下载发布包失败\n  ${url}\n  原因: ${reason}`,
+    extractFailed: (archive, reason) => `maactl: 解压 release 压缩包失败\n  ${archive}\n  原因: ${reason}`,
+    verifyFailed: (file, reason) => `maactl: 可执行文件校验失败 (${file})\n  原因: ${reason}`,
     explicitMissing: (file) => `maactl: MAACTL_BINARY 指向的文件不存在: ${file}`,
-    spawnFailed: (file, reason) => `maactl: 无法启动 maactl.exe (${file})\n  原因: ${reason}`,
+    spawnFailed: (file, reason) => `maactl: 无法启动 maactl (${file})\n  原因: ${reason}`,
+    unsupportedPlatform: (host) =>
+      `maactl: 当前平台没有预编译的可执行文件: ${host}\n  MaaCtl 只提供 win32/linux/darwin 上的 x64 与 arm64 构建。`,
+    downloadDisabled: () => 'maactl: 已设置 MAACTL_SKIP_DOWNLOAD，本地没有可用的 maactl，且不允许联网下载',
     resolveHint: () =>
       [
-        'maactl: 找不到 maactl.exe。可用的解决办法：',
-        '  1. 设置 MAACTL_BINARY 指向本地已有的 maactl.exe；',
-        '  2. 检查网络后重试，或设置 MAACTL_MIRROR 使用镜像下载；',
-        '  3. 手动下载 release 里的 maactl-<版本>-win-x86_64.zip，解压出 maactl.exe 放到 %LOCALAPPDATA%\\maactl\\npm\\<version>\\ 下。',
+        'maactl: 找不到可执行的 maactl。可用的解决办法：',
+        '  1. 设置 MAACTL_BINARY 指向本地已有的可执行文件；',
+        '  2. 重新安装（可选依赖可能被 --omit=optional 跳过或安装失败）：npm install maactl；',
+        '  3. 检查网络后重试，或设置 MAACTL_MIRROR 使用镜像下载 maactl-<版本>-<平台>.zip。',
       ].join('\n'),
-    skippingDownload: () => 'maactl: 已跳过 maactl.exe 下载 (MAACTL_SKIP_DOWNLOAD)',
-    bundledMissing: (file) => `maactl: 未找到内置的 ${file}，改为下载 maactl.exe`,
-    preDownloadFailed: (reason) => `maactl: 预下载 maactl.exe 失败 (${reason})`,
-    preDownloadHint: () =>
-      'maactl: 改为首次运行时下载；设置 MAACTL_STRICT_INSTALL=1 可让安装在此处直接失败。',
     usingBinary: (file) => `maactl: 使用 ${file}`,
   },
   en: {
-    downloading: (url) => `maactl: downloading maactl.exe for first use\n  ${url}`,
+    downloading: (url) => `maactl: downloading ${url.split('/').pop()} for first use\n  ${url}`,
     downloaded: (size, dest) => `maactl: downloaded ${size} to ${dest}`,
-    downloadFailed: (url, reason) => `maactl: could not download maactl.exe\n  ${url}\n  reason: ${reason}`,
+    downloadFailed: (url, reason) => `maactl: could not download the release archive\n  ${url}\n  reason: ${reason}`,
     extractFailed: (archive, reason) => `maactl: could not unpack the release archive\n  ${archive}\n  reason: ${reason}`,
-    verifyFailed: (file, reason) => `maactl: the downloaded maactl.exe failed verification (${file})\n  reason: ${reason}`,
+    verifyFailed: (file, reason) => `maactl: the executable failed verification (${file})\n  reason: ${reason}`,
     explicitMissing: (file) => `maactl: MAACTL_BINARY points at a missing file: ${file}`,
-    spawnFailed: (file, reason) => `maactl: could not start maactl.exe (${file})\n  reason: ${reason}`,
+    spawnFailed: (file, reason) => `maactl: could not start maactl (${file})\n  reason: ${reason}`,
+    unsupportedPlatform: (host) =>
+      `maactl: there is no prebuilt executable for this platform: ${host}\n  MaaCtl builds for x64 and arm64 on win32, linux and darwin.`,
+    downloadDisabled: () => 'maactl: MAACTL_SKIP_DOWNLOAD is set, no local maactl is available, and downloading is not allowed',
     resolveHint: () =>
       [
-        'maactl: maactl.exe could not be located. Things to try:',
-        '  1. set MAACTL_BINARY to an existing maactl.exe;',
-        '  2. check your network and retry, or set MAACTL_MIRROR to use a mirror;',
-        '  3. download maactl-<version>-win-x86_64.zip from the release page, unpack maactl.exe, and place it in %LOCALAPPDATA%\\maactl\\npm\\<version>\\.',
+        'maactl: no maactl executable could be located. Things to try:',
+        '  1. set MAACTL_BINARY to an existing executable;',
+        '  2. reinstall, in case the optional dependency was skipped (--omit=optional) or failed: npm install maactl;',
+        '  3. check your network and retry, or set MAACTL_MIRROR to fetch maactl-<version>-<platform>.zip through a mirror.',
       ].join('\n'),
-    skippingDownload: () => 'maactl: skipped downloading maactl.exe (MAACTL_SKIP_DOWNLOAD)',
-    bundledMissing: (file) => `maactl: no bundled ${file}; fetching maactl.exe instead`,
-    preDownloadFailed: (reason) => `maactl: could not pre-download maactl.exe (${reason})`,
-    preDownloadHint: () =>
-      'maactl: it will be fetched on first run instead; set MAACTL_STRICT_INSTALL=1 to fail the install here.',
     usingBinary: (file) => `maactl: using ${file}`,
   },
 };

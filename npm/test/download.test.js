@@ -7,7 +7,7 @@ const path = require('node:path');
 
 const { download, downloadWithRetry, formatBytes } = require('../lib/download');
 const shared = require('../lib/binary');
-const { tempDir, withEnvAsync, isolatedPackage, withServer, zipBuffer } = require('../test-support/helpers');
+const { tempDir, withEnv, withEnvAsync, isolatedPackage, withServer, zipBuffer, nativeExecutable } = require('../test-support/helpers');
 
 test('download writes the body and removes the .part file', async () => {
   const dest = path.join(tempDir(), 'maactl.exe');
@@ -117,18 +117,14 @@ test('downloadWithRetry retries transient failures', async () => {
   assert.equal(fs.readFileSync(dest, 'utf8'), 'MZ ok');
 });
 
-/** A byte payload that passes the PE header and size sanity checks. */
-function fakeExe() {
-  return Buffer.concat([Buffer.from('MZ'), Buffer.alloc(shared.MIN_BINARY_BYTES, 0x41)]);
-}
-
 /** The release archive the wrapper downloads: one platform, two executables. */
-function fakeArchive(exe = fakeExe()) {
-  return zipBuffer({ 'maactl.exe': exe, 'maactl-lite.exe': Buffer.from('lite') });
+function fakeArchive(exe = nativeExecutable()) {
+  const name = shared.executableName();
+  return zipBuffer({ [name]: exe, 'maactl-lite': Buffer.from('lite') }, { mode: 0o755 });
 }
 
 test('ensureBinary downloads the release archive, unpacks and then reuses the cache', async () => {
-  const payload = fakeExe();
+  const payload = nativeExecutable();
   const archive = fakeArchive(payload);
   let hits = 0;
   // A fresh copy of the wrapper: no vendor/maactl.exe can short-circuit the
@@ -166,9 +162,9 @@ test('ensureBinary downloads the release archive, unpacks and then reuses the ca
   assert.equal(hits, 1);
 });
 
-test('ensureBinary rejects an archive without maactl.exe', async () => {
+test('ensureBinary unpacks the executable with the mode the archive records', async () => {
   const { binary } = isolatedPackage();
-  const archive = zipBuffer({ 'maactl-lite.exe': Buffer.from('lite') });
+  const archive = fakeArchive();
   const route = `/${binary.assetName()}`;
 
   await withEnvAsync({ MAACTL_HOME: tempDir() }, () => withServer(
@@ -179,10 +175,40 @@ test('ensureBinary rejects an archive without maactl.exe', async () => {
     },
     async (base) => {
       process.env.MAACTL_BINARY_URL = `${base}${route}`;
-      await assert.rejects(binary.ensureBinary({ quiet: true }), /holds no maactl\.exe/);
+      const downloaded = await binary.ensureBinary({ quiet: true, verify: () => {} });
+      if (process.platform !== 'win32') {
+        const mode = fs.statSync(downloaded).mode & 0o777;
+        assert.ok(mode & 0o100, `the cached executable must be executable, mode is ${mode.toString(8)}`);
+      }
+    },
+  ));
+});
+
+test('ensureBinary rejects an archive without this platform executable', async () => {
+  const { binary } = isolatedPackage();
+  const name = shared.executableName();
+  const archive = zipBuffer({ 'maactl-lite': Buffer.from('lite') }, { mode: 0o755 });
+  const route = `/${binary.assetName()}`;
+
+  await withEnvAsync({ MAACTL_HOME: tempDir() }, () => withServer(
+    {
+      [route]: (request, response) => {
+        response.writeHead(200, { 'content-length': archive.length }).end(archive);
+      },
+    },
+    async (base) => {
+      process.env.MAACTL_BINARY_URL = `${base}${route}`;
+      await assert.rejects(binary.ensureBinary({ quiet: true }), new RegExp(`holds no ${name.replace('.', '\\.')}`));
       assert.equal(fs.existsSync(binary.archivePath()), false, 'a failed unpack must not leave the archive');
     },
   ));
+});
+
+test('ensureBinary refuses to download when MAACTL_SKIP_DOWNLOAD is set', async () => {
+  const { binary } = isolatedPackage();
+  await withEnvAsync({ MAACTL_HOME: tempDir(), MAACTL_SKIP_DOWNLOAD: '1' }, async () => {
+    await assert.rejects(binary.ensureBinary({ quiet: true }), /MAACTL_SKIP_DOWNLOAD/);
+  });
 });
 
 test('ensureBinary discards a downloaded binary that fails verification', async () => {

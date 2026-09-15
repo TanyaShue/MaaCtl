@@ -1,15 +1,19 @@
 'use strict';
 
-// Locating (and if necessary fetching) the maactl.exe the wrapper hands over to.
+// Locating (and if necessary fetching) the maactl executable the wrapper hands
+// over to.
 //
 // Resolution order:
 //   1. MAACTL_BINARY            – an explicit path supplied by the user;
-//   2. <package>/vendor/maactl.exe – the executable published inside the tarball;
-//   3. <cache>/npm/<version>/maactl.exe – a previous download, reused across runs.
+//   2. the maactl-<platform> optional dependency npm installed alongside this
+//      package, which carries the prebuilt executable of this platform;
+//   3. <cache>/npm/<version>/<exe> – a previous download, reused across runs.
 //
 // When none of them exists the release archive of this platform is downloaded
-// from the GitHub release that matches the package version, maactl.exe is
+// from the GitHub release that matches the package version, the executable is
 // unpacked out of it, and the result is verified and cached for the next run.
+// That path only runs for hosts without a platform package (an unsupported
+// platform, or an install that skipped optional dependencies).
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -20,20 +24,21 @@ const { downloadWithRetry, formatBytes, progressReporter } = require('./download
 const env = require('./env');
 const { MaactlError } = require('./errors');
 const messages = require('./messages');
+const platforms = require('./platforms');
 const zip = require('./zip');
 
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
 const PACKAGE = require(path.join(PACKAGE_ROOT, 'package.json'));
 
-// Every asset is a Windows PE binary; anything smaller than this floor is a
-// truncated download, an HTML error page or a git-lfs pointer.
+// Anything smaller than this floor is a truncated download, an HTML error page
+// or a git-lfs pointer rather than an executable.
 const MIN_BINARY_BYTES = 1 << 20;
 
-const EXE_NAME = 'maactl.exe';
+// How much of a file is read to identify its format: enough for the PE, ELF,
+// and Mach-O headers.
+const HEADER_BYTES = 4;
+
 const DEFAULT_REPO = 'TanyaShue/MaaCtl';
-// The wrapper is Windows-only (package.json restricts "os" to win32), so it
-// always takes the win-x86_64 archive of the release.
-const DEFAULT_PLATFORM = 'win-x86_64';
 
 function version() {
   return (env.value('MAACTL_VERSION') || PACKAGE.version).replace(/^v/, '');
@@ -47,8 +52,19 @@ function repo() {
   return env.value('MAACTL_REPO') || DEFAULT_REPO;
 }
 
+/** The MaaFramework platform id this run targets, or null on a host maactl has no build for. */
 function platform() {
-  return env.value('MAACTL_PLATFORM') || DEFAULT_PLATFORM;
+  const explicit = env.value('MAACTL_PLATFORM');
+  if (explicit) {
+    return explicit;
+  }
+  const entry = platforms.lookup();
+  return entry ? entry.id : null;
+}
+
+/** File name of the executable on this host, e.g. "maactl.exe" on Windows. */
+function executableName(host = process.platform) {
+  return platforms.executable(host);
 }
 
 /**
@@ -56,7 +72,15 @@ function platform() {
  * both the self-contained and the lite executable.
  */
 function assetName() {
-  return env.value('MAACTL_ASSET') || `maactl-${version()}-${platform()}.zip`;
+  const explicit = env.value('MAACTL_ASSET');
+  if (explicit) {
+    return explicit;
+  }
+  const id = platform();
+  if (!id) {
+    throw new MaactlError(messages.text('unsupportedPlatform', platforms.key()));
+  }
+  return `maactl-${version()}-${id}.zip`;
 }
 
 /** Cache root mirroring the CLI's own layout: %LOCALAPPDATA%\maactl on Windows. */
@@ -73,8 +97,8 @@ function home() {
   return path.join(cacheHome, 'maactl');
 }
 
-function cacheExePath(versionOverride) {
-  return path.join(home(), 'npm', versionOverride || version(), EXE_NAME);
+function cacheExePath(versionOverride, host = process.platform) {
+  return path.join(home(), 'npm', versionOverride || version(), executableName(host));
 }
 
 /**
@@ -85,8 +109,48 @@ function archivePath(exePath = cacheExePath()) {
   return path.join(path.dirname(exePath), assetName());
 }
 
-function bundledExePath() {
-  return path.join(PACKAGE_ROOT, 'vendor', EXE_NAME);
+/**
+ * Path of the executable shipped by the platform package npm installed next to
+ * this one, or null when it is not there.
+ *
+ * The platform packages are optional dependencies, so a host maactl has no build
+ * for simply does not get one; `npm install --omit=optional` skips them too.
+ * Resolution goes through require.resolve so that the package is found the same
+ * way npm placed it, including under pnpm's or Yarn PnP's layouts.
+ */
+function platformPackageExePath() {
+  const name = platforms.packageName();
+  let manifest;
+  try {
+    manifest = require.resolve(`${name}/package.json`);
+  } catch {
+    return null;
+  }
+  const executable = path.join(path.dirname(manifest), 'bin', executableName());
+  ensureExecutable(executable);
+  return executable;
+}
+
+/**
+ * Make sure a binary that came out of an npm install can actually be run.
+ *
+ * The executable bit does not survive every publish/install round trip: a
+ * tarball packed on Windows records no Unix mode at all. Setting it here keeps
+ * the promise that installing the package is enough to run it, whatever npm
+ * did with the mode. A failure is not fatal—the file may already be executable
+ * or the install read-only—so the run that follows reports the real problem.
+ */
+function ensureExecutable(file, host = process.platform) {
+  if (host === 'win32') {
+    return;
+  }
+  try {
+    if ((fs.statSync(file).mode & 0o111) === 0) {
+      fs.chmodSync(file, 0o755);
+    }
+  } catch {
+    // Nothing to fix: the caller reports a missing or unusable file.
+  }
 }
 
 function binaryUrl() {
@@ -108,7 +172,7 @@ function isUsable(file) {
 }
 
 /**
- * Return the path of an existing maactl.exe without touching the network, or
+ * Return the path of an existing executable without touching the network, or
  * `null` when nothing is available locally.
  */
 function resolveBinary() {
@@ -121,20 +185,23 @@ function resolveBinary() {
     return resolved;
   }
 
-  return [bundledExePath(), cacheExePath()].find(isUsable) || null;
+  return [platformPackageExePath(), cacheExePath()].find(isUsable) || null;
 }
 
-/** Sanity-check a freshly downloaded executable by asking it for its version. */
-function verifyBinary(file, { spawn = spawnSync } = {}) {
-  const header = Buffer.alloc(2);
+/**
+ * Sanity-check a freshly downloaded executable: it must have the native format
+ * of this platform, be large enough to be real, and run.
+ */
+function verifyBinary(file, { spawn = spawnSync, platform: host = process.platform } = {}) {
+  const header = Buffer.alloc(HEADER_BYTES);
   const fd = fs.openSync(file, 'r');
   try {
-    fs.readSync(fd, header, 0, 2, 0);
+    fs.readSync(fd, header, 0, HEADER_BYTES, 0);
   } finally {
     fs.closeSync(fd);
   }
-  if (header.toString('latin1') !== 'MZ') {
-    throw new MaactlError(messages.text('verifyFailed', file, 'not a Windows PE executable'));
+  if (!platforms.matchesFormat(header, host)) {
+    throw new MaactlError(messages.text('verifyFailed', file, `not a ${platforms.formatName(host)} executable`));
   }
   if (fs.statSync(file).size < MIN_BINARY_BYTES) {
     throw new MaactlError(messages.text('verifyFailed', file, 'file is truncated'));
@@ -158,15 +225,24 @@ function verifyBinary(file, { spawn = spawnSync } = {}) {
 }
 
 /**
- * Unpack maactl.exe out of the downloaded release archive and write it to dest.
+ * Unpack the executable out of the downloaded release archive and write it to
+ * dest, making sure it is executable.
  */
-function writeExecutable(archive, dest) {
+function writeExecutable(archive, dest, host = process.platform) {
   const data = fs.readFileSync(archive);
-  const payload = zip.extractEntry(data, EXE_NAME);
-  if (!payload) {
-    throw new Error(`${archive} holds no ${EXE_NAME} (contains: ${zip.entryNames(data).join(', ') || 'nothing'})`);
+  const name = executableName(host);
+  const entry = zip.readEntry(data, name);
+  if (!entry) {
+    throw new Error(`${archive} holds no ${name} (contains: ${zip.entryNames(data).join(', ') || 'nothing'})`);
   }
-  fs.writeFileSync(dest, payload);
+  fs.writeFileSync(dest, entry.data, { mode: entry.mode || 0o755 });
+  if (host !== 'win32') {
+    // The zip records 0755 for the executables the release builds, but an
+    // archive written without Unix attributes has none, and the umask can strip
+    // bits from the mode passed to writeFileSync. The binary has to be
+    // executable, so make sure of it.
+    ensureExecutable(dest, host);
+  }
 }
 
 /**
@@ -178,6 +254,9 @@ async function ensureBinary({ write = () => {}, quiet = false, verify = verifyBi
   const existing = resolveBinary();
   if (existing) {
     return existing;
+  }
+  if (env.flag('MAACTL_SKIP_DOWNLOAD')) {
+    throw new MaactlError(messages.text('downloadDisabled'));
   }
 
   const dest = cacheExePath();
@@ -239,7 +318,7 @@ async function ensureBinary({ write = () => {}, quiet = false, verify = verifyBi
   return dest;
 }
 
-/** Print the exe the wrapper will hand over to, when MAACTL_VERBOSE is set. */
+/** Print the executable the wrapper will hand over to, when MAACTL_VERBOSE is set. */
 function verbose() {
   return env.flag('MAACTL_VERBOSE');
 }
@@ -248,7 +327,7 @@ module.exports = {
   PACKAGE,
   PACKAGE_ROOT,
   MIN_BINARY_BYTES,
-  EXE_NAME,
+  executableName,
   version,
   tag,
   repo,
@@ -257,7 +336,8 @@ module.exports = {
   home,
   cacheExePath,
   archivePath,
-  bundledExePath,
+  platformPackageExePath,
+  ensureExecutable,
   binaryUrl,
   resolveBinary,
   ensureBinary,

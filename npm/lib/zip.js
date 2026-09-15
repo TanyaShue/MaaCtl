@@ -48,6 +48,7 @@ function entries(archive) {
     if (archive.readUInt32LE(offset) !== SIGNATURE_CENTRAL_FILE) {
       throw new Error('corrupt zip archive: bad central directory entry');
     }
+    const versionMadeBy = archive.readUInt16LE(offset + 4);
     const method = archive.readUInt16LE(offset + 10);
     const checksum = archive.readUInt32LE(offset + 16);
     const compressedSize = archive.readUInt32LE(offset + 20);
@@ -55,19 +56,52 @@ function entries(archive) {
     const nameLength = archive.readUInt16LE(offset + 28);
     const extraLength = archive.readUInt16LE(offset + 30);
     const commentLength = archive.readUInt16LE(offset + 32);
+    const externalAttributes = archive.readUInt32LE(offset + 38);
     const localOffset = archive.readUInt32LE(offset + 42);
     const name = archive.subarray(offset + 46, offset + 46 + nameLength).toString('utf8');
     if (compressedSize === ZIP64_MARKER || uncompressedSize === ZIP64_MARKER || localOffset === ZIP64_MARKER) {
       throw new Error(`Zip64 archives are not supported (${name})`);
     }
-    found.push({ name, method, checksum, compressedSize, uncompressedSize, localOffset });
+    found.push({
+      name,
+      method,
+      checksum,
+      compressedSize,
+      uncompressedSize,
+      localOffset,
+      mode: unixMode(versionMadeBy, externalAttributes),
+    });
     offset += 46 + nameLength + extraLength + commentLength;
   }
   return found;
 }
 
+/**
+ * The Unix permission bits a central directory entry records, or null.
+ *
+ * The high byte of "version made by" names the host that wrote the entry, and
+ * only Unix hosts store a mode in the high 16 bits of external_attr. Archives
+ * written on Windows carry none, so callers must have a sensible default.
+ */
+function unixMode(versionMadeBy, externalAttributes) {
+  if ((versionMadeBy >> 8) !== 3) {
+    return null;
+  }
+  const mode = (externalAttributes >>> 16) & 0o7777;
+  return mode === 0 ? null : mode;
+}
+
 /** Read one member of an archive, decompressing it. */
 function extractEntry(archive, name) {
+  const entry = readEntry(archive, name);
+  return entry ? entry.data : null;
+}
+
+/**
+ * Read one member of an archive, returning its bytes together with the Unix
+ * mode it records (null when the archive was not written on a Unix host).
+ */
+function readEntry(archive, name) {
   const entry = entries(archive).find((candidate) => candidate.name === name);
   if (!entry) {
     return null;
@@ -99,7 +133,7 @@ function extractEntry(archive, name) {
   if (typeof zlib.crc32 === 'function' && zlib.crc32(payload) !== entry.checksum) {
     throw new Error(`checksum mismatch for ${name}`);
   }
-  return payload;
+  return { data: payload, mode: entry.mode };
 }
 
 /** List the member names of an archive, which is handy in error messages. */
@@ -107,4 +141,4 @@ function entryNames(archive) {
   return entries(archive).map((entry) => entry.name);
 }
 
-module.exports = { extractEntry, entryNames };
+module.exports = { extractEntry, readEntry, entryNames };

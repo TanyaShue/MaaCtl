@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 
-const { extractEntry, entryNames } = require('../lib/zip');
+const { extractEntry, readEntry, entryNames } = require('../lib/zip');
 const { zipBuffer } = require('../test-support/helpers');
 
 const PAYLOAD = Buffer.from('MZ'.padEnd(4096, '\0'));
@@ -30,6 +30,18 @@ test('extractEntry rejects corrupt archives', () => {
   const archive = zipBuffer({ 'maactl.exe': PAYLOAD });
   archive.writeUInt32LE(0x01020304, 0); // damage the local header signature
   assert.throws(() => extractEntry(archive, 'maactl.exe'), /bad local header/);
+});
+
+test('readEntry reports the Unix mode an archive recorded', () => {
+  const archive = zipBuffer({ maactl: PAYLOAD }, { mode: 0o755 });
+  const entry = readEntry(archive, 'maactl');
+  assert.deepEqual(entry.data, PAYLOAD);
+  assert.equal(entry.mode, 0o755);
+});
+
+test('readEntry reports no mode for an archive written without Unix attributes', () => {
+  const archive = zipBuffer({ maactl: PAYLOAD });
+  assert.equal(readEntry(archive, 'maactl').mode, null);
 });
 
 test('extractEntry detects truncation and checksum damage', () => {

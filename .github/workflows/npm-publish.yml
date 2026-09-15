@@ -41,7 +41,11 @@ permissions:
 jobs:
   npm:
     name: Publish maactl to npm
-    runs-on: windows-latest
+    # Linux on purpose: the wrapper itself is platform independent, and packing
+    # the platform packages here records the executable bit in their tarballs.
+    # (The wrapper still fixes the mode after an install, because a tarball
+    # packed on Windows carries no Unix mode at all.)
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write # npm publish --provenance needs an OIDC token
@@ -60,19 +64,16 @@ jobs:
 
       - name: Compute version metadata from the tag
         id: meta
-        shell: pwsh
-        run: |
-          $python = if (Get-Command python3 -ErrorAction SilentlyContinue) { 'python3' } else { 'python' }
-          & $python .github/scripts/release.py metadata --tag "$env:TAG" >> $env:GITHUB_OUTPUT
+        run: python3 .github/scripts/release.py metadata --tag "$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Check the tag carries the npm package
-        shell: pwsh
         run: |
           # Tags cut before npm/ existed cannot be published; fail with a clear
           # message instead of a cryptic error from the steps below.
-          if (-not (Test-Path npm/package.json)) {
-            throw "tag $env:TAG predates the npm/ package; there is nothing to publish to npm"
-          }
+          if [ ! -f npm/package.json ]; then
+            echo "::error::tag $TAG predates the npm/ package; there is nothing to publish to npm"
+            exit 1
+          fi
 
       - name: Set up Node
         uses: actions/setup-node@v6
@@ -80,81 +81,77 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      - name: Download the released executable
+      - name: Download every platform archive of the release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          # Every platform ships one archive holding both executables; the npm
-          # wrapper is Windows-only, so it always takes the win-x86_64 one.
-          gh release download "$env:TAG" --pattern "maactl-*-win-x86_64.zip" --dir dist --clobber
-          $archive = Get-ChildItem dist -Filter *.zip | Select-Object -First 1
-          if (-not $archive) {
-            throw "release $env:TAG has no maactl-*-win-x86_64.zip asset; run the Release workflow first"
-          }
-          Expand-Archive -LiteralPath $archive.FullName -DestinationPath dist -Force
-          if (-not (Test-Path dist/maactl.exe)) {
-            throw "$($archive.Name) carries no maactl.exe"
-          }
-          Write-Host "extracted dist/maactl.exe from $($archive.Name)"
+          mkdir -p dist
+          # One archive per platform, each holding the self-contained and the
+          # lite executable; the platform packages are built from these.
+          gh release download "$TAG" --pattern "maactl-*-*.zip" --dir dist --clobber
+          ls -l dist
 
       - name: Stamp the package version from the tag
         working-directory: npm
         env:
           VERSION: ${{ steps.meta.outputs.version }}
-        shell: pwsh
         run: |
-          npm version "$env:VERSION" --no-git-tag-version --allow-same-version
-          # The tarball must ship the executable built for this very tag.
-          $reported = "$(& ../dist/maactl.exe --version)"
-          Write-Host "dist/maactl.exe reports: $reported"
-          if ($reported -notmatch [regex]::Escape($env:VERSION)) {
-            throw "dist/maactl.exe reports '$reported', expected version $env:VERSION"
-          }
-          Write-Host "publishing maactl@$env:VERSION"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          # `npm version` runs the sync-version hook; run it once more so a
+          # version that did not change still re-pins the platform packages.
+          node scripts/platform-packages.js sync-version
+          node scripts/platform-packages.js check
+          echo "publishing maactl@$VERSION"
 
       - name: Run wrapper tests
         working-directory: npm
         run: npm test
 
-      - name: Vendor the self-contained executable
+      - name: Build the platform packages
         working-directory: npm
-        run: node scripts/vendor-binary.js ../dist/maactl.exe
+        run: node scripts/platform-packages.js prepare --dist ../dist
 
       - name: Check the npm registry for an existing version
         id: exists
         working-directory: npm
-        shell: pwsh
         run: |
-          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          npm view "maactl@$version" version *> $null
-          $already = if ($LASTEXITCODE -eq 0) { 'true' } else { 'false' }
-          Write-Host "maactl@${version} already on npm: $already"
-          "already=$already" >> $env:GITHUB_OUTPUT
-          # npm exits 1 when the version does not exist yet, which is the normal
-          # "not published" answer: do not let that exit code fail the step.
-          exit 0
+          version=$(node -p "require('./package.json').version")
+          if npm view "maactl@$version" version >/dev/null 2>&1; then
+            already=true
+          else
+            already=false
+          fi
+          echo "maactl@${version} already on npm: $already"
+          echo "already=$already" >> "$GITHUB_OUTPUT"
 
-      - name: Publish to npm
+      - name: Publish the platform packages
         if: success() && env.NODE_AUTH_TOKEN != '' && env.DRY_RUN != 'true' && steps.exists.outputs.already == 'false'
         working-directory: npm
-        shell: pwsh
         env:
           CHANNEL: ${{ steps.meta.outputs.channel }}
         run: |
-          $tag = if ($env:CHANNEL -eq 'stable') { 'latest' } else { $env:CHANNEL }
-          Write-Host "npm dist-tag: $tag"
+          tag=$([ "$CHANNEL" = "stable" ] && echo latest || echo "$CHANNEL")
+          echo "npm dist-tag: $tag"
+          npm run platforms:publish -- --tag "$tag"
+
+      - name: Publish the wrapper
+        if: success() && env.NODE_AUTH_TOKEN != '' && env.DRY_RUN != 'true' && steps.exists.outputs.already == 'false'
+        working-directory: npm
+        env:
+          CHANNEL: ${{ steps.meta.outputs.channel }}
+        run: |
+          # Last on purpose: the wrapper's optional dependencies must already
+          # exist, or the first installs would silently skip them.
+          tag=$([ "$CHANNEL" = "stable" ] && echo latest || echo "$CHANNEL")
           npm publish --access public --provenance --tag "$tag"
 
       - name: Report why nothing was published
         if: success() && (env.NODE_AUTH_TOKEN == '' || env.DRY_RUN == 'true' || steps.exists.outputs.already == 'true')
-        shell: pwsh
         run: |
-          if ($env:NODE_AUTH_TOKEN -eq '') {
-            Write-Warning 'NPM_TOKEN is not configured; add the repository secret to enable npm publishing.'
-          } elseif ($env:DRY_RUN -eq 'true') {
-            Write-Host 'dry run: skipped the final npm publish'
-          } else {
-            Write-Host 'This version is already on npm; nothing to publish (versions cannot be overwritten).'
-          }
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::warning::NPM_TOKEN is not configured; add the repository secret to enable npm publishing."
+          elif [ "$DRY_RUN" = 'true' ]; then
+            echo 'dry run: skipped the final npm publish'
+          else
+            echo 'This version is already on npm; nothing to publish (versions cannot be overwritten).'
+          fi
