@@ -12,11 +12,12 @@ ProjectInterface v2（PI）项目，检查其中的控制器、资源、任务�
 
 ## 快速开始
 
-### 方式一：npm（仅 Windows，推荐）
+### 方式一：npm（推荐）
 
-包内自带 MaaFramework，装完即用，不需要手动配 PATH、也不需要准备 DLL 目录：
+包内自带 MaaFramework，装完即用，不需要手动配 PATH、也不需要准备运行库目录。
+Windows、Linux、macOS 上的 x64 与 arm64 都支持，npm 只会安装当前平台需要的那个可选依赖：
 
-```powershell
+```bash
 # 免安装试用
 npx maactl -v
 
@@ -25,13 +26,13 @@ npm install -g maactl
 maactl -v
 ```
 
-```powershell
-maactl pi t -if D:\01_Projects\github\MaaMio
+```bash
+maactl pi t -if /path/to/project
 maactl device adb
-maactl run -t 签到 -if D:\01_Projects\github\MaaMio -sa 30s
+maactl run -t 签到 -if /path/to/project -sa 30s
 ```
 
-`maactl` 之后的参数原样透传给 `maactl.exe`（中文、含空格的路径、`-`/`--` 选项都支持），
+`maactl` 之后的参数原样透传给可执行文件（中文、含空格的路径、`-`/`--` 选项都支持），
 工作目录不变，退出码也一致。包装器的查找顺序与环境变量见
 [docs/npm-package.md](docs/npm-package.md)。
 
@@ -153,7 +154,7 @@ maactl help run                                # 查看某条命令的帮助
 | [docs/pi-cli-design.md](docs/pi-cli-design.md) | 现行 CLI 设计（第二版）：设计原则、命令面、协议落实清单、实现分期 |
 | [docs/build.md](docs/build.md) | 从源码构建两种 exe、打包 MaaFramework、运行库查找顺序、版本注入与本地验证 |
 | [docs/architecture.md](docs/architecture.md) | 目录结构与各包职责 |
-| [docs/npm-package.md](docs/npm-package.md) | npm 分发包（`npx maactl`）的设计、环境变量与体积取舍 |
+| [docs/npm-package.md](docs/npm-package.md) | npm 分发包（`npx maactl`）的平台包模型、环境变量与发布流程 |
 | [docs/release.md](docs/release.md) | 发版流程：推送 tag → GitHub Release → 自动发布 npm |
 | [docs/maafw-cli-design.md](docs/maafw-cli-design.md) | 第一版 CLI 设计（已废弃，仅作历史记录） |
 
@@ -161,7 +162,7 @@ maactl help run                                # 查看某条命令的帮助
 
 - 操作系统：Windows 10/11、Linux（glibc，需 `libdbus-1-3` 与 `libatomic1`）或 macOS 13+，
   x86_64 与 arm64 都有对应产物。
-- 用 npm 方式安装时额外需要 Node.js ≥ 22（仅 Windows）。
+- 用 npm 方式安装时额外需要 Node.js ≥ 22。
 - 运行 ADB 任务时设备需已连接，且 `adb devices` 能看到设备；运行桌面窗口任务时目标窗口需已打开。
   Windows 用 Win32 控制器、macOS 用 MacOS 控制器、Linux 用 wlroots 控制器（需要 Wayland 会话）。
 - 怀疑运行库没加载成功时，用 `maactl selfcheck` 看一下实际加载到的版本与来源。

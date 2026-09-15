@@ -61,13 +61,17 @@ gh workflow run npm-publish.yml -f tag=v0.1.1                  # 补发 / 重发
 gh workflow run npm-publish.yml -f tag=v0.1.2 -f dry_run=true   # 只演练，不真正 publish
 ```
 
-工作流流程：checkout 该 tag → `release.py metadata` 算出 version/channel → 确认 tag 里存在
-`npm/` → `gh release download --pattern "maactl-*-win-x86_64.zip"` 取回 `build` 产出的 Windows
-压缩包并解出 `maactl.exe` → `npm version` 对齐包版本并校验 exe 的 `--version` 确实包含该版本号 →
-`npm test` → `node scripts/vendor-binary.js` 把 exe 放进 `npm/vendor/` → 查询 npm 上是否已有该版本
-（有则跳过）→ `npm publish --access public --provenance --tag <latest|alpha|beta|rc>`。
+工作流流程（跑在 Linux runner 上，以便 tarball 记录可执行位）：checkout 该 tag →
+`release.py metadata` 算出 version/channel → 确认 tag 里存在 `npm/` →
+`gh release download --pattern "maactl-*-*.zip"` 取回**六个平台**的压缩包 →
+`npm version` 对齐包版本，并把 `optionalDependencies` 重新钉到同一版本 → `npm test` →
+`node scripts/platform-packages.js prepare` 从压缩包生成六个平台包 → 查询 npm 上是否已有该版本
+（有则跳过）→ 先发布六个平台包，再 `npm publish --access public --provenance --tag <latest|alpha|beta|rc>`
+发布主包。
 
-npm 包只面向 Windows（`os: win32`），其余平台的分发就是上面那六个压缩包。
+npm 主包只有一份包装器代码（约 15 kB），二进制分别放在六个平台包里，由 `optionalDependencies`
+按 `os`/`cpu` 选择；因此安装一次即可用，不需要运行后再下载。详见
+[npm-package.md](npm-package.md)。
 
 ### 为什么不用 `on: release: published`
 
@@ -102,5 +106,6 @@ npm view maactl dist-tags --registry=https://registry.npmjs.org
 npm audit signatures --registry=https://registry.npmjs.org
 ```
 
-`npm/**` 有改动时，`.github/workflows/npm.yml` 会单独跑包装器测试，并在 Node 22 上用轻量版 exe
-做一次 `npx --package . maactl -v` 冒烟。
+`npm/**` 有改动时，`.github/workflows/npm.yml` 会在 ubuntu / windows / macos 三个平台上跑包装器测试，
+并在禁止下载（`MAACTL_SKIP_DOWNLOAD=1`）的前提下做一次端到端冒烟：把本地构建的轻量版可执行文件
+装成当前平台的可选依赖，再用 `node bin/maactl.js -v` 与 `npx --package . maactl -v` 各跑一次。

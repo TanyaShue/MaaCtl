@@ -151,16 +151,19 @@ python3 .github/scripts/build_release.py --platform linux-x86_64 --version 1.2.3
 
 不需要发布就能验证包装器（细节见 [npm-package.md](npm-package.md)）：
 
-```powershell
+```bash
 cd npm
 npm test                                   # 单元测试，离线可跑
-npm run vendor:binary -- ..\maactl.exe      # 把本地构建的 exe 放进 vendor/，模拟发布包
-npx --yes --package . maactl -v
+node scripts/platform-packages.js check     # manifest 与平台表是否一致
+
+# 把本地构建的可执行文件装成当前平台的可选依赖，模拟发布包
+go build -tags bundled -o ../maactl.exe ./cmd/maactl
+node scripts/platform-packages.js link ../maactl.exe
+MAACTL_SKIP_DOWNLOAD=1 node bin/maactl.js -v
 ```
 
-也可以跳过打包，直接让包装器使用本地 exe：
+也可以跳过打包，直接让包装器使用本地可执行文件：
 
-```powershell
-$env:MAACTL_BINARY = "D:\01_Projects\github\MaaCtl\maactl.exe"
-node npm\bin\maactl.js -v
+```bash
+MAACTL_BINARY=../maactl.exe node npm/bin/maactl.js -v
 ```
