@@ -132,7 +132,10 @@ jobs:
         run: |
           tag=$([ "$CHANNEL" = "stable" ] && echo latest || echo "$CHANNEL")
           echo "npm dist-tag: $tag"
-          npm run platforms:publish -- --tag "$tag"
+          # --delay spaces the creations out: six sibling names published back to
+          # back are what npm's spam detection reacts to. Re-runs skip whatever a
+          # previous attempt already published.
+          npm run platforms:publish -- --tag "$tag" --delay 20
 
       - name: Publish the wrapper
         if: success() && env.NODE_AUTH_TOKEN != '' && env.DRY_RUN != 'true' && steps.exists.outputs.already == 'false'

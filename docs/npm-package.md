@@ -148,6 +148,12 @@ gh workflow run npm-publish.yml -f tag=v0.1.1 -f dry_run=true   # 只演练，�
    正式版打 `latest`，预发布按通道打 `alpha`/`beta`/`rc` 标签（与 GitHub Release 的
    Pre-release 语义一致），带 `--provenance`。
 
+平台包的发布有两处刻意的安排：**逐个之间间隔 `--delay`**（CI 传 20 秒），以及**已存在同版本的包
+直接跳过**。原因是 npm 对新包的创建有反滥用检测：把六个同族的新包名连续创建会被判为 spam 并返回
+`403 ... Package name triggered spam detection`（实测第一个通过、第二个被拦）。间隔创建能避开这个
+检测，遇到该 403 时脚本还会做有限次退避重试；而跳过已发布的版本让失败后的重跑可以接着往下走，
+不会因为「版本已存在」再次失败。
+
 发布成功后 registry 还要做几十秒到十几分钟的异步处理（平台包里有 30 MiB 级的二进制要扫描，
 带 provenance 的版本还要校验 attestation）。这期间 `npm view maactl@<version>` 依旧是 404，
 日志里会出现 `Your package is being processed and may take a few minutes to become available.`

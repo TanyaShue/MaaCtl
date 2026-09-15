@@ -229,33 +229,121 @@ function npmInvocation() {
   return { command: process.platform === 'win32' ? 'npm.cmd' : 'npm', args: [], shell: process.platform === 'win32' };
 }
 
-/** Publish every prepared platform package, then leave the wrapper to the caller. */
-function publish({ dir, tag, dryRun }) {
-  const wrapper = readManifest();
+/** The registry publishes go to, honouring the usual npm configuration. */
+function registry() {
+  const configured = process.env.npm_config_registry || process.env.NPM_CONFIG_REGISTRY;
+  return (configured || 'https://registry.npmjs.org/').replace(/\/+$/, '');
+}
+
+/**
+ * The versions of a package that already exist upstream, or null when the
+ * registry could not be asked. Callers treat null as "carry on and publish":
+ * npm itself then reports a duplicate version, which is the accurate answer.
+ */
+async function publishedVersions(name) {
+  // The abbreviated packument is small even for packages with many versions.
+  const url = `${registry()}/${name.replace('/', '%2f')}`;
+  try {
+    const response = await fetch(url, { headers: { accept: 'application/vnd.npm.install-v1+json' } });
+    if (response.status === 404) {
+      return new Set();
+    }
+    if (!response.ok) {
+      return null;
+    }
+    const packument = await response.json();
+    return new Set(Object.keys(packument.versions || {}));
+  } catch {
+    return null;
+  }
+}
+
+/** npm's answer when it refuses the creation of a new package as suspected spam. */
+const SPAM_REFUSAL = 'triggered spam detection';
+const SPAM_ATTEMPTS = 3;
+const SPAM_BACKOFF_MS = 45_000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Publish one prepared platform package, retrying the one failure that is worth
+ * retrying.
+ *
+ * npm refuses the creation of a new package whose name it suspects of spam, and
+ * it does so for the sibling names of a platform family published back to back.
+ * That refusal is about timing rather than about the package, so a bounded
+ * backoff turns it into a hiccup instead of a failed release.
+ */
+async function publishPlatformPackage(entry, packageDir, tag, dryRun) {
   const invocation = npmInvocation();
+  const args = [...invocation.args, 'publish', packageDir, '--access', 'public', '--tag', tag];
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    // Provenance needs an OIDC token, which only the CI providers hand out.
+    args.push('--provenance');
+  }
+  if (dryRun) {
+    args.push('--dry-run');
+  }
+
+  for (let attempt = 1; ; attempt += 1) {
+    process.stdout.write(`$ npm ${args.slice(invocation.args.length).join(' ')}\n`);
+    const result = spawnSync(invocation.command, args, { encoding: 'utf8', shell: invocation.shell });
+    if (result.stdout) {
+      process.stdout.write(result.stdout);
+    }
+    if (result.stderr) {
+      process.stderr.write(result.stderr);
+    }
+    if (result.error) {
+      throw result.error;
+    }
+    if (result.status === 0) {
+      return;
+    }
+    const output = `${result.stdout || ''}${result.stderr || ''}`;
+    if (attempt < SPAM_ATTEMPTS && output.includes(SPAM_REFUSAL)) {
+      const wait = SPAM_BACKOFF_MS * attempt;
+      process.stdout.write(
+        `npm refused ${entry.package} as suspected spam; retrying in ${Math.round(wait / 1000)}s (${attempt}/${SPAM_ATTEMPTS - 1})\n`,
+      );
+      await sleep(wait);
+      continue;
+    }
+    throw new Error(`npm publish failed for ${entry.package} (exit ${result.status})`);
+  }
+}
+
+/** Publish every prepared platform package, then leave the wrapper to the caller. */
+async function publish({ dir, tag, dryRun, delay }) {
+  const wrapper = readManifest();
+  let published = 0;
   for (const entry of platforms.all()) {
     const packageDir = path.join(dir, entry.package);
     if (!fs.existsSync(path.join(packageDir, 'package.json'))) {
       throw new Error(`${packageDir} is not prepared; run prepare first`);
     }
-    const args = [...invocation.args, 'publish', packageDir, '--access', 'public', '--tag', tag];
-    if (process.env.GITHUB_ACTIONS === 'true') {
-      // Provenance needs an OIDC token, which only the CI providers hand out.
-      args.push('--provenance');
+
+    // Re-running a release must not fail on the packages the previous attempt
+    // already published, and must not spend the pacing delay on them either.
+    const existing = await publishedVersions(entry.package);
+    if (existing && existing.has(wrapper.version)) {
+      process.stdout.write(`${entry.package}@${wrapper.version} is already on npm; skipping\n`);
+      continue;
     }
-    if (dryRun) {
-      args.push('--dry-run');
+
+    if (published > 0 && delay > 0) {
+      // Sibling packages published back to back are what npm's spam detection
+      // reacts to, so space the creations out.
+      await sleep(delay * 1000);
     }
-    process.stdout.write(`$ npm ${args.slice(invocation.args.length).join(' ')}\n`);
-    const result = spawnSync(invocation.command, args, { stdio: 'inherit', shell: invocation.shell });
-    if (result.error) {
-      throw result.error;
-    }
-    if (result.status !== 0) {
-      throw new Error(`npm publish failed for ${entry.package} (exit ${result.status})`);
-    }
+    await publishPlatformPackage(entry, packageDir, tag, dryRun);
+    published += 1;
   }
-  process.stdout.write(`\npublished ${platforms.all().length} platform packages at ${wrapper.version} (dist-tag ${tag})\n`);
+  if (published === 0) {
+    process.stdout.write(`\nall ${platforms.all().length} platform packages are already at ${wrapper.version}\n`);
+    return 0;
+  }
+  process.stdout.write(`\npublished ${published} platform packages at ${wrapper.version} (dist-tag ${tag})\n`);
   return 0;
 }
 
@@ -266,7 +354,7 @@ commands:
   link <executable> [--force]            install this host's platform package from a local build
   sync-version                           pin optionalDependencies to this package's version
   check                                  assert package.json lists exactly the known platforms
-  publish [--dir <dir>] [--tag <tag>] [--dry-run]
+  publish [--dir <dir>] [--tag <tag>] [--delay <seconds>] [--dry-run]
                                          npm publish every prepared platform package (default dist-tag: latest)
 `;
 
@@ -328,6 +416,7 @@ function main(argv) {
         dir: path.resolve(options.dir || DEFAULT_OUT),
         tag: options.tag || 'latest',
         dryRun: Boolean(options['dry-run']),
+        delay: Number(options.delay || 0),
       });
     }
     default:
@@ -335,16 +424,19 @@ function main(argv) {
   }
 }
 
-try {
-  process.exitCode = main(process.argv.slice(2));
-} catch (error) {
-  if (error instanceof UsageError) {
-    process.stderr.write(`platform-packages: ${error.message}\n\n${USAGE}`);
-  } else {
-    process.stderr.write(`platform-packages: ${error.message}\n`);
-    if (process.env.MAACTL_DEBUG) {
-      process.stderr.write(`${error.stack}\n`);
+Promise.resolve()
+  .then(() => main(process.argv.slice(2)))
+  .then((code) => {
+    process.exitCode = code;
+  })
+  .catch((error) => {
+    if (error instanceof UsageError) {
+      process.stderr.write(`platform-packages: ${error.message}\n\n${USAGE}`);
+    } else {
+      process.stderr.write(`platform-packages: ${error.message}\n`);
+      if (process.env.MAACTL_DEBUG) {
+        process.stderr.write(`${error.stack}\n`);
+      }
     }
-  }
-  process.exitCode = 1;
-}
+    process.exitCode = 1;
+  });
